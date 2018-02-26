@@ -1,6 +1,6 @@
  {.deadCodeElim: on.}
 include "cairo_pragma.nim"
-const 
+const
   CAIRO_HAS_TEE_SURFACE = true
   CAIRO_HAS_DRM_SURFACE = true
   CAIRO_HAS_SKIA_SURFACE = true
@@ -237,10 +237,10 @@ proc setLineJoin*(cr: Context; lineJoin: LineJoin) {.
 
 proc `lineJoin=`*(cr: Context; lineJoin: LineJoin) {.
     importc: "cairo_set_line_join", libcairo.}
-proc setDash*(cr: Context; dashes: var cdouble; numDashes: cint; offset: cdouble) {.
+proc setDash*(cr: Context; dashes: ptr cdouble; numDashes: cint; offset: cdouble) {.
     importc: "cairo_set_dash", libcairo.}
-proc `dash=`*(cr: Context; dashes: var cdouble; numDashes: cint; offset: cdouble) {.
-    importc: "cairo_set_dash", libcairo.}
+proc setDash*(cr: Context; dashes: var seq[cdouble], offset: cdouble) =
+    setDash(cr, addr dashes[0], cint dashes.len, offset)
 proc setMiterLimit*(cr: Context; limit: cdouble) {.
     importc: "cairo_set_miter_limit", libcairo.}
 proc `miterLimit=`*(cr: Context; limit: cdouble) {.
@@ -1185,7 +1185,7 @@ proc meshPatternSetCornerColorRgba*(pattern: Pattern;
                                         green: cdouble; blue: cdouble;
                                         alpha: cdouble) {.
     importc: "cairo_mesh_pattern_set_corner_color_rgba", libcairo.}
-proc setMatrix*(pattern: Pattern; matrix: Matrix) {.
+proc setMatrix*(pattern: Pattern; matrix: ptr Matrix) {.
     importc: "cairo_pattern_set_matrix", libcairo.}
 proc `matrix=`*(pattern: Pattern; matrix: Matrix) {.
     importc: "cairo_pattern_set_matrix", libcairo.}
@@ -1273,27 +1273,27 @@ proc meshPatternGetControlPoint*(pattern: Pattern; patchNum: cuint;
                                      pointNum: cuint; x: var cdouble; y: var cdouble): Status {.
     importc: "cairo_mesh_pattern_get_control_point", libcairo.}
 
-proc init*(matrix: Matrix; xx: cdouble; yx: cdouble; xy: cdouble;
+proc init*(matrix: ptr Matrix; xx: cdouble; yx: cdouble; xy: cdouble;
                      yy: cdouble; x0: cdouble; y0: cdouble) {.
     importc: "cairo_matrix_init", libcairo.}
-proc initIdentity*(matrix: Matrix) {.
+proc initIdentity*(matrix: ptr Matrix) {.
     importc: "cairo_matrix_init_identity", libcairo.}
-proc initTranslate*(matrix: Matrix; tx: cdouble; ty: cdouble) {.
+proc initTranslate*(matrix: ptr Matrix; tx: cdouble; ty: cdouble) {.
     importc: "cairo_matrix_init_translate", libcairo.}
-proc initScale*(matrix: Matrix; sx: cdouble; sy: cdouble) {.
+proc initScale*(matrix: ptr Matrix; sx: cdouble; sy: cdouble) {.
     importc: "cairo_matrix_init_scale", libcairo.}
-proc initRotate*(matrix: Matrix; radians: cdouble) {.
+proc initRotate*(matrix: ptr Matrix; radians: cdouble) {.
     importc: "cairo_matrix_init_rotate", libcairo.}
-proc translate*(matrix: Matrix; tx: cdouble; ty: cdouble) {.
+proc translate*(matrix: ptr Matrix; tx: cdouble; ty: cdouble) {.
     importc: "cairo_matrix_translate", libcairo.}
-proc scale*(matrix: Matrix; sx: cdouble; sy: cdouble) {.
+proc scale*(matrix: ptr Matrix; sx: cdouble; sy: cdouble) {.
     importc: "cairo_matrix_scale", libcairo.}
-proc rotate*(matrix: Matrix; radians: cdouble) {.
+proc rotate*(matrix: ptr Matrix; radians: cdouble) {.
     importc: "cairo_matrix_rotate", libcairo.}
-proc invert*(matrix: Matrix): Status {.
+proc invert*(matrix: ptr Matrix): Status {.
     importc: "cairo_matrix_invert", libcairo.}
-proc multiply*(result: Matrix; a: Matrix;
-                         b: Matrix) {.importc: "cairo_matrix_multiply",
+proc multiply*(result: ptr Matrix; a: ptr Matrix;
+                         b: ptr Matrix) {.importc: "cairo_matrix_multiply",
     libcairo.}
 proc transformDistance*(matrix: Matrix; dx: var cdouble;
                                   dy: var cdouble) {.
