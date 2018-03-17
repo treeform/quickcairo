@@ -18,7 +18,7 @@ ctx.arc(xc, yc, radius, angle1, angle2)
 ctx.stroke()
 
 # draw helping lines
-ctx.setSourceRgba(1, 0.2, 0.2, 0.6)
+ctx.setSource(1, 0.2, 0.2, 0.6)
 ctx.setLineWidth(6.0)
 
 ctx.arc(xc, yc, 10.0, 0, 2*PI)
@@ -42,7 +42,7 @@ ctx.clip()
 ctx.newPath()  # current path is not consumed by ctx.clip()
 ctx.rectangle(0, 0, 256, 256)
 ctx.fill()
-ctx.setSourceRgb(0, 1, 0)
+ctx.setSource(0, 1, 0)
 ctx.moveTo(0, 0)
 ctx.lineTo(256, 256)
 ctx.moveTo(256, 0)
@@ -70,7 +70,6 @@ ctx.scale(256.0 / w, 256.0 / h)
 ctx.setSourceSurface(image, 0, 0)
 ctx.paint()
 
-image.destroy()
 ctx.stroke()
 
 ```
@@ -95,7 +94,7 @@ ctx.curveTo(x1, y1, x2, y2, x3, y3)
 ctx.setLineWidth( 10.0)
 ctx.stroke()
 
-ctx.setSourceRgba(1, 0.2, 0.2, 0.6)
+ctx.setSource(1, 0.2, 0.2, 0.6)
 ctx.setLineWidth(6.0)
 ctx.moveTo(x, y)
 ctx.lineTo(x1, y1)
@@ -147,9 +146,9 @@ ctx.relLineTo(-51.2, -51.2)
 ctx.closePath()
 
 ctx.setLineWidth(10.0)
-ctx.setSourceRgb(0, 0, 1)
+ctx.setSource(0, 0, 1)
 ctx.fillPreserve()
-ctx.setSourceRgb(0, 0, 0)
+ctx.setSource(0, 0, 0)
 ctx.stroke()
 
 ```
@@ -164,7 +163,6 @@ linerGradient.addColorStopRgba(0, 1, 1, 1, 1)
 ctx.rectangle(0, 0, 256, 256)
 ctx.setSource(linerGradient)
 ctx.fill()
-linerGradient.destroy()
 
 var radialGradient  = patternCreateRadial(115.2, 102.4, 25.6, 102.4,  102.4, 128.0)
 radialGradient.addColorStopRgba(0, 1, 1, 1, 1)
@@ -172,7 +170,6 @@ radialGradient.addColorStopRgba(1, 0, 0, 0, 1)
 ctx.setSource(radialGradient)
 ctx.arc(128.0, 128.0, 76.8, 0, 2 * PI)
 ctx.fill()
-radialGradient.destroy()
 
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/gradient.png)
@@ -193,7 +190,6 @@ ctx.translate(-0.5 * w, -0.5 * h)
 ctx.setSourceSurface(image, 0, 0)
 ctx.paint()
 
-image.destroy()
 ctx.stroke()
 
 ```
@@ -208,7 +204,7 @@ var
   h = float image.imageSurfaceGetHeight()
 
 var pattern = patternCreateForSurface(image)
-pattern.set_extend(Extend.REPEAT)
+pattern.set_extend(Extend.repeat)
 
 ctx.translate(128.0, 128.0)
 ctx.rotate(PI / 4)
@@ -216,16 +212,14 @@ ctx.scale(1.0 / sqrt(2.0), 1.0 / sqrt(2.0))
 ctx.translate(-128.0, -128.0)
 
 var matrix: Matrix
-initScale(addr matrix, w/256.0 * 5.0, h/256.0 * 5.0)
-pattern.setMatrix(addr matrix)
+initScale(matrix, w/256.0 * 5.0, h/256.0 * 5.0)
+pattern.setMatrix(matrix)
 
 ctx.setSource(pattern)
 
 ctx.rectangle(0, 0, 256.0, 256.0)
 ctx.fill()
 
-pattern.destroy()
-image.destroy()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/image_pattern.png)
 
@@ -233,21 +227,21 @@ image.destroy()
 ```nim
 
 ctx.setLineWidth(30.0)
-ctx.setLineCap(LineCap.BUTT) # default
+ctx.setLineCap(LineCap.butt) # default
 ctx.moveTo(64.0, 50.0)
 ctx.lineTo(64.0, 200.0)
 ctx.stroke()
-ctx.setLineCap(LineCap.ROUND)
+ctx.setLineCap(LineCap.round)
 ctx.moveTo(128.0, 50.0)
 ctx.lineTo(128.0, 200.0)
 ctx.stroke()
-ctx.setLine_cap (LineCap.SQUARE)
+ctx.setLine_cap (LineCap.square)
 ctx.moveTo(192.0, 50.0)
 ctx.lineTo(192.0, 200.0)
 ctx.stroke()
 
 # draw helping lines
-ctx.setSourceRgb(1, 0.2, 0.2)
+ctx.setSource(1, 0.2, 0.2)
 ctx.setLineWidth(2.56)
 ctx.moveTo(64.0, 50.0)
 ctx.lineTo(64.0, 200.0)
@@ -267,19 +261,19 @@ ctx.setLineWidth(40.96)
 ctx.moveTo(76.8, 84.48)
 ctx.relLineTo(51.2, -51.2)
 ctx.relLineTo(51.2, 51.2)
-ctx.setLineJoin(LineJoin.MITER) # default
+ctx.setLineJoin(LineJoin.miter) # default
 ctx.stroke()
 
 ctx.moveTo(76.8, 161.28)
 ctx.relLineTo(51.2, -51.2)
 ctx.relLineTo(51.2, 51.2)
-ctx.setLineJoin(LineJoin.BEVEL)
+ctx.setLineJoin(LineJoin.bevel)
 ctx.stroke()
 
 ctx.moveTo(76.8, 238.08)
 ctx.relLineTo(51.2, -51.2)
 ctx.relLineTo(51.2, 51.2)
-ctx.setLineJoin(LineJoin.ROUND)
+ctx.setLineJoin(LineJoin.round)
 ctx.stroke()
 
 ```
@@ -306,9 +300,9 @@ ctx.arc(x + radius, y + height - radius, radius, 90 * degrees, 180 * degrees)
 ctx.arc(x + radius, y + radius, radius, 180 * degrees, 270 * degrees)
 ctx.closePath()
 
-ctx.setSourceRgb(0.5, 0.5, 1)
+ctx.setSource(0.5, 0.5, 1)
 ctx.fillPreserve()
-ctx.setSourceRgba(0.5, 0, 0, 0.5)
+ctx.setSource(0.5, 0, 0, 0.5)
 ctx.setLineWidth(10.0)
 ctx.stroke()
 
@@ -318,7 +312,7 @@ ctx.stroke()
 ## example: examples/text.nim
 ```nim
 
-ctx.selectFontFace("Sans", FONT_SLANT.NORMAL, FONT_WEIGHT.NORMAL)
+ctx.selectFontFace("Sans", FONT_SLANT.normal, FONT_WEIGHT.normal)
 ctx.setFontSize(90.0)
 
 ctx.moveTo(10.0, 135.0)
@@ -326,14 +320,14 @@ ctx.showText("Hello")
 
 ctx.moveTo(70.0, 165.0)
 ctx.textPath("void")
-ctx.setSourceRgb(0.5, 0.5, 1)
+ctx.setSource(0.5, 0.5, 1)
 ctx.fillPreserve()
-ctx.setSourceRgb(0, 0, 0)
+ctx.setSource(0, 0, 0)
 ctx.setLineWidth(2.56)
 ctx.stroke()
 
 # draw helping lines
-ctx.setSourceRgba(1, 0.2, 0.2, 0.6)
+ctx.setSource(1, 0.2, 0.2, 0.6)
 ctx.arc(10.0, 135.0, 5.12, 0, 2*PI)
 ctx.closePath()
 ctx.arc(70.0, 165.0, 5.12, 0, 2*PI)
@@ -346,13 +340,13 @@ ctx.fill()
 ## example: examples/text_align.nim
 ```nim
 
-ctx.selectFontFace("Sans", FONT_SLANT.NORMAL, FONT_WEIGHT.NORMAL)
+ctx.selectFontFace("Sans", FONT_SLANT.normal, FONT_WEIGHT.normal)
 ctx.setFontSize(52.0)
 
 var
   text = "cairo"
-  extents: TextExtentsObj
-ctx.text_extents(text, addr extents)
+  extents: TextExtents
+ctx.textExtents(text, extents)
 
 var
   x = 128.0 - (extents.width / 2 + extents.xBearing)
@@ -362,7 +356,7 @@ ctx.moveTo(x, y)
 ctx.showText(text)
 
 # draw helping lines
-ctx.setSourceRgba(1, 0.2, 0.2, 0.6)
+ctx.setSource(1, 0.2, 0.2, 0.6)
 ctx.setLineWidth(6.0)
 ctx.arc(x, y, 10.0, 0, 2*PI)
 ctx.fill()

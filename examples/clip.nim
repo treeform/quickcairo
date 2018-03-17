@@ -4,8 +4,8 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.ARGB32, 256, 256)
-  ctx = serface.create()
+  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = serface.newContext()
 
 ctx.arc(128.0, 128.0, 76.8, 0, 2 * PI)
 ctx.clip()
@@ -13,7 +13,7 @@ ctx.clip()
 ctx.newPath()  # current path is not consumed by ctx.clip()
 ctx.rectangle(0, 0, 256, 256)
 ctx.fill()
-ctx.setSourceRgb(0, 1, 0)
+ctx.setSource(0, 1, 0)
 ctx.moveTo(0, 0)
 ctx.lineTo(256, 256)
 ctx.moveTo(256, 0)

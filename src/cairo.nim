@@ -1,5 +1,162 @@
- {.deadCodeElim: on.}
-include "cairo/cairo_pragma.nim"
+# this is the high level cairo module for Nim -- based on the low level ngtk3 module, manually tuned.
+# S. Salewski 2017, cairo 1.15.6
+
+# cairo does not really support gobject introspection and gobject's toggle references.
+# so code for memory management is a bit different compared to other gtk modules.
+
+# This is the template for creation of new objects:
+
+# proc newImageSurface*(format: Format; width, height: int): Surface =
+#   new(result, surfaceDestroy)
+#   result.impl = cairo_image_surface_create(format, width.cint, height.cint)
+#   discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+# with
+
+# proc gcuref(o: pointer) {.cdecl.} =  GC_unref(cast[RootRef](o))
+# proc surfaceDestroy*(surface: Surface) = cairo_surface_destroy(surface.impl)
+
+# and this is the template for refering such an object:
+
+#proc newContext*(target: Surface): Context =
+#  new(result, destroy)
+#  GC_ref(target)
+#  result.impl = cairo_create(target.impl)
+#  discard cairo_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+# we have to call GC_ref() because we store no direct reference to the proxy object.
+# for this example cairo_create() references the surface.
+# when ref count of surface is decreased, maybe because context is destroyed, then gcuref is called
+# which calls GC_unref() on proxy. When there is no other ref to proxy GC can free proxy and surface
+# by calling surfaceDestroy(). This works also when surface is newer used for something.
+
+# currently this is still nearly untested!
+# one problem may be procs like cairo_surface_create_similar() when called frequently, maybe
+# for each frame in animations. GC may be too slow in freeing the memory.
+# We should try to avoid such usage, or we may add a way to manually free memory.
+# Maybe later destructors can be used?
+
+# Some procs are marked with label TODO -- because I have no real idea what to do with them
+
+# sed -E -i '/proc cairo/s/([a-z0-9])([A-Z])/\1_\L\2/g' cairo.nim
+# sed -E 's/_([a-z])/\U\1/g' <<< my_long_variable
+# sed -i 's/importc: "[a-z_]*"/importc/g' cairo.nim
+{.deadCodeElim: on.}
+
+when defined(windows):
+  const LIB_CAIRO* = "libcairo-2.dll"
+elif defined(macosx):
+  const LIB_CAIRO* = "libcairo.dylib"
+else:
+  const LIB_CAIRO* = "libcairo.so(|.2)"
+
+{.pragma: libcairo, cdecl, dynlib: LIB_CAIRO.}
+
+type
+  Context00* = object
+  Context* = ref object of RootRef
+    impl*: ptr Context00
+
+type
+  Surface00* = object
+  Surface* = ref object of RootRef
+    impl*: ptr Surface00
+
+type
+  Matrix* {.byRef.} = object
+    xx*: cdouble
+    yx*: cdouble
+    xy*: cdouble
+    yy*: cdouble
+    x0*: cdouble
+    y0*: cdouble
+
+type
+  Pattern00* = object
+  Pattern* = ref object of RootRef
+    impl*: ptr Pattern00
+
+type
+  Region00* = object
+  Region* = ref object of RootRef
+    impl*: ptr Region00
+
+type
+  Content* {.size: sizeof(cint), pure.} = enum
+    color = 0x1000, alpha = 0x2000,
+    color_alpha = 0x3000
+
+type
+  FontOptions00* = object
+  FontOptions* = ref object of RootRef
+    impl*: ptr FontOptions00
+
+type
+  FontFace00*  = object
+  FontFace* = ref object of RootRef
+    impl*: ptr FontFace00
+
+type
+  ScaledFont00* = object
+  ScaledFont* = ref object of RootRef
+    impl*: ptr ScaledFont00
+
+type
+  Status* {.size: sizeof(cint), pure.} = enum
+    success = 0, noMemory, invalidRestore,
+    invalidPopGroup, noCurrentPoint,
+    invalidMatrix, invalidStatus,
+    nullPointer, invalidString,
+    invalidPathData, readError,
+    writeError, surfaceFinished,
+    surfaceTypeMismatch, patternTypeMismatch,
+    invalidContent, invalidFormat,
+    invalidVisual, fileNotFound,
+    invalidDash, invalidDscComment,
+    invalidIndex, clipNotRepresentable,
+    tempFileError, invalidStride,
+    fontTypeMismatch, userFontImmutable,
+    userFontError, negativeCount,
+    invalidClusters, invalidSlant,
+    invalidWeight, invalidSize,
+    userFontNotImplemented, deviceTypeMismatch,
+    deviceError, invalidMeshConstruction,
+    deviceFinished, jbig2GlobalMissing,
+    pngError, freetypeError,
+    win32GdiError, tagError, lastStatus
+
+type
+  PathDataType* {.size: sizeof(cint), pure.} = enum
+    moveTo, lineTo, curveTo, closePath
+
+type
+  INNER_C_STRUCT_3330700347* = object
+    t*: PathDataType
+    length*: cint
+
+  INNER_C_STRUCT_1651263489* = object
+    x*: cdouble
+    y*: cdouble
+
+  PathData00* = object {.union.}
+    header*: INNER_C_STRUCT_3330700347
+    point*: INNER_C_STRUCT_1651263489
+
+type
+  Path00* = object
+    status*: Status
+    data*: ptr PathData00
+    numData*: cint
+  Path* = ref object of RootRef
+    impl*: ptr Path00
+
+type
+  RectangleInt* {.byRef.} = object
+    x*: cint
+    y*: cint
+    width*: cint
+    height*: cint
+
 const
   CAIRO_HAS_TEE_SURFACE = true
   CAIRO_HAS_DRM_SURFACE = true
@@ -11,392 +168,626 @@ const
   CAIRO_HAS_PDF_SURFACE = true
   CAIRO_HAS_PNG_FUNCTIONS = true
 
-template cairo_Version_Encode*(major, minor, micro: expr): expr =
+template cairo_Version_Encode*(major, minor, micro: untyped): untyped =
   ((major * 10000) + (minor * 100) + (micro * 1))
 
-proc version*(): cint {.importc: "cairo_version", libcairo.}
-proc versionString*(): cstring {.importc: "cairo_version_string", libcairo.}
+proc cairo_version*(): cint {.importc, libcairo.}
+proc cairo_version_string*(): cstring {.importc, libcairo.}
 
 type
-  CairoBoolT* = distinct cint
+  Bool00* = distinct cint
 
-# we should not need these constants often, because we have converters to and from Nim bool
-const
-  CAIRO_FALSE* = CairoBoolT(0)
-  CAIRO_TRUE* = CairoBoolT(1)
+# we should not need these constants
+#const
+#  CAIRO_FALSE* = Bool00(0)
+#  CAIRO_TRUE* = Bool00(1)
 
-converter cbool*(nimbool: bool): CairoBoolT =
-  ord(nimbool).CairoBoolT
+#converter cbool*(nimbool: bool): Bool00 =
+#  ord(nimbool).Bool00
 
-converter toBool*(cbool: CairoBoolT): bool =
-  int(cbool) != 0
-
-type
-  Context* =  ptr ContextObj
-  ContextPtr* = ptr ContextObj
-  ContextObj* = object
+#converter toBool*(cbool: Bool00): bool =
+#  int(cbool) != 0
 
 type
-  Surface* =  ptr SurfaceObj
-  SurfacePtr* = ptr SurfaceObj
-  SurfaceObj* = object
+  Device00* = object
+  Device* = ref object of RootRef
+    impl*: ptr Device00
 
 type
-  Device* =  ptr DeviceObj
-  DevicePtr* = ptr DeviceObj
-  DeviceObj* = object
+  DestroyFunc00* = proc (data: pointer) {.cdecl.}
 
 type
-  Matrix* =  ptr MatrixObj
-  MatrixPtr* = ptr MatrixObj
-  MatrixObj* = object
-    xx*: cdouble
-    yx*: cdouble
-    xy*: cdouble
-    yy*: cdouble
-    x0*: cdouble
-    y0*: cdouble
-
-converter matrixobj2matrix(m: var MatrixObj): Matrix =
-  addr(m)
-type
-  Pattern* =  ptr PatternObj
-  PatternPtr* = ptr PatternObj
-  PatternObj* = object
-
-type
-  CairoDestroyFuncT* = proc (data: pointer) {.cdecl.}
-
-type
-  UserDataKey* =  ptr UserDataKeyObj
-  UserDataKeyPtr* = ptr UserDataKeyObj
-  UserDataKeyObj* = object
+  UserDataKey* = object
     unused: cint
+  #UserDataKey* = ref object
+  #  impl*: ptr UserDataKey00
 
-type
-  Status* {.size: sizeof(cint), pure.} = enum
-    SUCCESS = 0, NO_MEMORY, INVALID_RESTORE,
-    INVALID_POP_GROUP, NO_CURRENT_POINT,
-    INVALID_MATRIX, INVALID_STATUS,
-    NULL_POINTER, INVALID_STRING,
-    INVALID_PATH_DATA, READ_ERROR,
-    WRITE_ERROR, SURFACE_FINISHED,
-    SURFACE_TYPE_MISMATCH, PATTERN_TYPE_MISMATCH,
-    INVALID_CONTENT, INVALID_FORMAT,
-    INVALID_VISUAL, FILE_NOT_FOUND,
-    INVALID_DASH, INVALID_DSC_COMMENT,
-    INVALID_INDEX, CLIP_NOT_REPRESENTABLE,
-    TEMP_FILE_ERROR, INVALID_STRIDE,
-    FONT_TYPE_MISMATCH, USER_FONT_IMMUTABLE,
-    USER_FONT_ERROR, NEGATIVE_COUNT,
-    INVALID_CLUSTERS, INVALID_SLANT,
-    INVALID_WEIGHT, INVALID_SIZE,
-    USER_FONT_NOT_IMPLEMENTED, DEVICE_TYPE_MISMATCH,
-    DEVICE_ERROR, INVALID_MESH_CONSTRUCTION,
-    DEVICE_FINISHED, JBIG2_GLOBAL_MISSING,
-    LAST_STATUS
+var NUDK: ptr UserDataKey = cast[ptr UserDataKey](alloc(sizeof(UserDataKey)))
 
-type
-  Content* {.size: sizeof(cint), pure.} = enum
-    COLOR = 0x1000, ALPHA = 0x2000,
-    COLOR_ALPHA = 0x3000
+proc gcuref(o: pointer) {.cdecl.} =
+  #echo "gcunref"
+  GC_unref(cast[RootRef](o))
 
 type
   Format* {.size: sizeof(cint), pure.} = enum
-    INVALID = - 1, ARGB32 = 0, RGB24 = 1,
-    A8 = 2, A1 = 3, RGB16_565 = 4,
-    RGB30 = 5
+    invalid = - 1, argb32 = 0, rgb24 = 1,
+    a8 = 2, a1 = 3, rgb16_565 = 4,
+    rgb30 = 5
 
 type
-  CairoWriteFuncT* = proc (closure: pointer; data: ptr cuchar; length: cuint): Status {.cdecl.}
+  WriteFunc00* = proc (closure: pointer; data: ptr cuchar; length: cuint): Status {.cdecl.}
 
 type
-  CairoReadFuncT* = proc (closure: pointer; data: ptr cuchar; length: cuint): Status {.cdecl.}
+  ReadFunc00* = proc (closure: pointer; data: ptr cuchar; length: cuint): Status {.cdecl.}
 
-type
-  RectangleInt* =  ptr RectangleIntObj
-  RectangleIntPtr* = ptr RectangleIntObj
-  RectangleIntObj* = object
-    x*: cint
-    y*: cint
-    width*: cint
-    height*: cint
+proc cairo_get_user_data*(cr: ptr Context00; key: ptr UserDataKey): pointer {.importc, libcairo.}
+#
+proc getUserData*(cr: Context; key: ptr UserDataKey): pointer =
+  cairo_get_user_data(cr.impl, key)
+#
+#const userData* = getUserData
 
-proc create*(target: Surface): Context {.importc: "cairo_create",
-    libcairo.}
-proc reference*(cr: Context): Context {.importc: "cairo_reference",
-    libcairo.}
-proc destroy*(cr: Context) {.importc: "cairo_destroy", libcairo.}
-proc getReferenceCount*(cr: Context): cuint {.
-    importc: "cairo_get_reference_count", libcairo.}
-proc referenceCount*(cr: Context): cuint {.
-    importc: "cairo_get_reference_count", libcairo.}
-proc getUserData*(cr: Context; key: UserDataKey): pointer {.
-    importc: "cairo_get_user_data", libcairo.}
-proc userData*(cr: Context; key: UserDataKey): pointer {.
-    importc: "cairo_get_user_data", libcairo.}
-proc setUserData*(cr: Context; key: UserDataKey; userData: pointer;
-                      destroy: CairoDestroyFuncT): Status {.
-    importc: "cairo_set_user_data", libcairo.}
-proc save*(cr: Context) {.importc: "cairo_save", libcairo.}
-proc restore*(cr: Context) {.importc: "cairo_restore", libcairo.}
-proc pushGroup*(cr: Context) {.importc: "cairo_push_group", libcairo.}
-proc pushGroupWithContent*(cr: Context; content: Content) {.
-    importc: "cairo_push_group_with_content", libcairo.}
-proc popGroup*(cr: Context): Pattern {.importc: "cairo_pop_group",
-    libcairo.}
-proc popGroupToSource*(cr: Context) {.importc: "cairo_pop_group_to_source",
-    libcairo.}
+proc cairo_set_user_data*(cr: ptr Context00; key: ptr UserDataKey; user_data: pointer;
+  destroy: DestroyFunc00): Status {.importc, libcairo.}
+#
+proc setUserData*(cr: Context; key: ptr UserDataKey; userData: pointer; destroy: DestroyFunc00): Status =
+  cairo_set_user_data(cr.impl, key, userData, destroy)
+#
+#const `userData=`* = setUserData
+
+proc cairo_destroy*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc destroy*(cr: Context) =
+  cairo_destroy(cr.impl)
+
+proc cairo_surface_reference*(surface: ptr Surface00): ptr Surface00 {.importc, libcairo.}
+#
+proc surfaceReference*(surface: Surface): Surface =
+  discard cairo_surface_reference(surface.impl)
+  return surface
+
+proc cairo_create*(target: ptr Surface00): ptr Context00 {.importc, libcairo.}
+#
+proc newContext*(target: Surface): Context =
+  new(result, destroy)
+  GC_ref(target)
+  result.impl = cairo_create(target.impl)
+  discard cairo_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_reference*(cr: ptr Context00): ptr Context00 {.importc, libcairo.}
+#
+proc reference*(cr: Context): Context =
+  discard cairo_reference(cr.impl)
+  return cr
+
+proc cairo_get_reference_count*(cr: ptr Context00): cuint {.importc, libcairo.}
+#
+proc getReferenceCount*(cr: Context): int =
+  cairo_get_reference_count(cr.impl).int
+#
+#const referenceCount* = getReferenceCount
+
+proc cairo_save*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc save*(cr: Context) =
+  cairo_save(cr.impl)
+
+proc cairo_restore*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc restore*(cr: Context) =
+  cairo_restore(cr.impl)
+
+proc cairo_push_group*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc pushGroup*(cr: Context) =
+  cairo_push_group(cr.impl)
+
+proc cairo_push_group_with_content*(cr: ptr Context00; content: Content) {.importc, libcairo.}
+#
+#proc pushGroupWithContent*(cr: Context; content: Content) =
+proc pushGroup*(cr: Context; content: Content) =
+  cairo_push_group_with_content(cr.impl, content)
+
+proc cairo_pattern_destroy*(pattern: ptr Pattern00) {.importc, libcairo.}
+#
+proc patternDestroy*(pattern: Pattern) =
+  cairo_pattern_destroy(pattern.impl)
+
+proc cairo_pattern_set_user_data*(pattern: ptr Pattern00; key: ptr UserDataKey; userData: pointer;
+  destroy: DestroyFunc00): Status {.importc, libcairo.}
+#
+proc setUserData*(pattern: Pattern; key: ptr UserDataKey; userData: pointer; destroy: DestroyFunc00): Status =
+  cairo_pattern_set_user_data(pattern.impl, key, userData, destroy)
+
+proc cairo_pop_group*(cr: ptr Context00): ptr Pattern00 {.importc, libcairo.}
+#
+proc popGroup*(cr: Context): Pattern =
+  new(result, patternDestroy)
+  result.impl = cairo_pop_group(cr.impl)
+  discard cairo_pattern_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_pop_group_to_source*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc popGroupToSource*(cr: Context) =
+  cairo_pop_group_to_source(cr.impl)
 
 type
   Operator* {.size: sizeof(cint), pure.} = enum
-    CLEAR, SOURCE, OVER,
-    `IN`, `OUT`, ATOP,
-    DEST, DEST_OVER, DEST_IN,
-    DEST_OUT, DEST_ATOP, XOR,
-    ADD, SATURATE, MULTIPLY,
-    SCREEN, OVERLAY, DARKEN,
-    LIGHTEN, COLOR_DODGE, COLOR_BURN,
-    HARD_LIGHT, SOFT_LIGHT,
-    DIFFERENCE, EXCLUSION, HSL_HUE,
-    HSL_SATURATION, HSL_COLOR,
-    HSL_LUMINOSITY
+    clear, source, over,
+    `in`, `out`, atop,
+    dest, destOver, destIn,
+    destOut, destAtop, `xor`,
+    add, saturate, multiply,
+    screen, overlay, darken,
+    lighten, color_dodge, colorBurn,
+    hardLight, softLight,
+    difference, exclusion, hslHue,
+    hslSaturation, hslColor,
+    hslLuminosity
 
-proc setOperator*(cr: Context; op: Operator) {.
-    importc: "cairo_set_operator", libcairo.}
+proc cairo_set_operator*(cr: ptr Context00; op: Operator) {.importc, libcairo.}
+#
+proc setOperator*(cr: Context; op: Operator) =
+  cairo_set_operator(cr.impl, op)
+#
+#const `operator=`* = setOperator
 
-proc `operator=`*(cr: Context; op: Operator) {.
-    importc: "cairo_set_operator", libcairo.}
-proc setSource*(cr: Context; source: Pattern) {.
-    importc: "cairo_set_source", libcairo.}
-proc `source=`*(cr: Context; source: Pattern) {.
-    importc: "cairo_set_source", libcairo.}
-proc setSourceRgb*(cr: Context; red: cdouble; green: cdouble; blue: cdouble) {.
-    importc: "cairo_set_source_rgb", libcairo.}
-proc `sourceRgb=`*(cr: Context; red: cdouble; green: cdouble; blue: cdouble) {.
-    importc: "cairo_set_source_rgb", libcairo.}
-proc setSourceRgba*(cr: Context; red: cdouble; green: cdouble; blue: cdouble;
-                        alpha: cdouble) {.importc: "cairo_set_source_rgba",
-                                        libcairo.}
-proc `sourceRgba=`*(cr: Context; red: cdouble; green: cdouble; blue: cdouble;
-                        alpha: cdouble) {.importc: "cairo_set_source_rgba",
-                                        libcairo.}
-proc setSourceSurface*(cr: Context; surface: Surface; x: cdouble;
-                           y: cdouble) {.importc: "cairo_set_source_surface",
-                                       libcairo.}
-proc `sourceSurface=`*(cr: Context; surface: Surface; x: cdouble;
-                           y: cdouble) {.importc: "cairo_set_source_surface",
-                                       libcairo.}
-proc setTolerance*(cr: Context; tolerance: cdouble) {.
-    importc: "cairo_set_tolerance", libcairo.}
-proc `tolerance=`*(cr: Context; tolerance: cdouble) {.
-    importc: "cairo_set_tolerance", libcairo.}
+proc cairo_set_source*(cr: ptr Context00; source: ptr Pattern00) {.importc, libcairo.}
+#
+proc setSource*(cr: Context; source: Pattern) =
+  GC_ref(source)
+  cairo_set_source(cr.impl, source.impl)
+#
+#const `source=`* = setSource
+
+proc cairo_set_source_rgb*(cr: ptr Context00; red, green, blue: cdouble) {.importc, libcairo.}
+#
+#proc setSourceRgb*(cr: Context; red, green, blue: float) =
+proc setSource*(cr: Context; red, green, blue: float) =
+  cairo_set_source_rgb(cr.impl, red.cdouble, green.cdouble, blue.cdouble)
+#
+#const `source=`* = setSourceRgb
+
+proc cairo_set_source_rgba*(cr: ptr Context00; red, green, blue, alpha: cdouble) {.importc, libcairo.}
+#
+proc setSource*(cr: Context; red, green, blue, alpha: float) =
+#proc setSourceRgba*(cr: Context; red, green, blue, alpha: float) =
+  cairo_set_source_rgba(cr.impl, red.cdouble, green.cdouble, blue.cdouble, alpha.cdouble)
+#
+#const `sourceRgba=`* = setSourceRgba
+
+proc cairo_surface_get_reference_count*(surface: ptr Surface00): cuint {.importc, libcairo.}
+#
+proc getReferenceCount*(surface: Surface): int =
+  cairo_surface_get_reference_count(surface.impl).int
+#
+#const referenceCount* = getReferenceCount
+
+proc cairo_set_source_surface*(cr: ptr Context00; surface: ptr Surface00; x, y: cdouble) {.importc, libcairo.}
+#
+proc setSourceSurface*(cr: Context; surface: Surface; x, y: float) =
+  #GC_ref(source) # we guess that surface is nor referenced, but a new intern pattern is created
+  #let h = cairo_surface_get_reference_count(surface.impl)
+  cairo_set_source_surface(cr.impl, surface.impl, x.cdouble, y.cdouble)
+  #assert(cairo_surface_get_reference_count(surface.impl) == h) # is our guess OK?
+#
+#const `sourceSurface=`* = setSourceSurface
+
+proc cairo_set_tolerance*(cr: ptr Context00; tolerance: cdouble) {.importc, libcairo.}
+#
+proc setTolerance*(cr: Context; tolerance: float) =
+  cairo_set_tolerance(cr.impl, tolerance.cdouble)
+#
+const `tolerance=`* = setTolerance
 
 type
   Antialias* {.size: sizeof(cint), pure.} = enum
-    DEFAULT, NONE, GRAY,
-    SUBPIXEL, FAST, GOOD,
-    BEST
+    default, none, gray,
+    subpixel, fast, good,
+    best
 
-proc setAntialias*(cr: Context; antialias: Antialias) {.
-    importc: "cairo_set_antialias", libcairo.}
-
-proc `antialias=`*(cr: Context; antialias: Antialias) {.
-    importc: "cairo_set_antialias", libcairo.}
+proc cairo_set_antialias*(cr: ptr Context00; antialias: Antialias) {.importc, libcairo.}
+#
+proc setAntialias*(cr: Context; antialias = Antialias.default) =
+  cairo_set_antialias(cr.impl, antialias)
+#
+const `antialias=`* = setAntialias
 
 type
   FillRule* {.size: sizeof(cint), pure.} = enum
-    WINDING, EVEN_ODD
+    winding, evenOdd
 
-proc setFillRule*(cr: Context; fillRule: FillRule) {.
-    importc: "cairo_set_fill_rule", libcairo.}
+proc cairo_set_fill_rule*(cr: ptr Context00; fillRule: FillRule) {.importc, libcairo.}
+#
+proc setFillRule*(cr: Context; fillRule: FillRule) =
+  cairo_set_fill_rule(cr.impl, fillRule)
+#
+const `fillRule=`* = setFillRule
 
-proc `fillRule=`*(cr: Context; fillRule: FillRule) {.
-    importc: "cairo_set_fill_rule", libcairo.}
-proc setLineWidth*(cr: Context; width: cdouble) {.
-    importc: "cairo_set_line_width", libcairo.}
-proc `lineWidth=`*(cr: Context; width: cdouble) {.
-    importc: "cairo_set_line_width", libcairo.}
+proc cairo_set_line_width*(cr: ptr Context00; width: cdouble) {.importc, libcairo.}
+#
+proc setLineWidth*(cr: Context; width: float) =
+  cairo_set_line_width(cr.impl, width.cdouble)
+#
+const `lineWidth=`* = setLineWidth
 
 type
   LineCap* {.size: sizeof(cint), pure.} = enum
-    BUTT, ROUND, SQUARE
+    butt, round, square
 
-proc setLineCap*(cr: Context; lineCap: LineCap) {.
-    importc: "cairo_set_line_cap", libcairo.}
-
-proc `lineCap=`*(cr: Context; lineCap: LineCap) {.
-    importc: "cairo_set_line_cap", libcairo.}
+proc cairo_set_line_cap*(cr: ptr Context00; lineCap: LineCap) {.importc, libcairo.}
+#
+proc setLineCap*(cr: Context; lineCap: LineCap) =
+  cairo_set_line_cap(cr.impl, lineCap)
+#
+const `lineCap=`*  = setLineCap
 
 type
   LineJoin* {.size: sizeof(cint), pure.} = enum
-    MITER, ROUND, BEVEL
+    miter, round, bevel
 
-proc setLineJoin*(cr: Context; lineJoin: LineJoin) {.
-    importc: "cairo_set_line_join", libcairo.}
+proc cairo_set_line_join*(cr: ptr Context00; lineJoin: Line_join) {.importc, libcairo.}
+#
+proc setLineJoin*(cr: Context; lineJoin: LineJoin) =
+  cairo_set_line_join(cr.impl, lineJoin)
+#
+const `lineJoin=`* = setLineJoin
 
-proc `lineJoin=`*(cr: Context; lineJoin: LineJoin) {.
-    importc: "cairo_set_line_join", libcairo.}
-proc setDash*(cr: Context; dashes: ptr cdouble; numDashes: cint; offset: cdouble) {.
-    importc: "cairo_set_dash", libcairo.}
-proc setDash*(cr: Context; dashes: var seq[cdouble], offset: cdouble) =
-    setDash(cr, addr dashes[0], cint dashes.len, offset)
-proc setMiterLimit*(cr: Context; limit: cdouble) {.
-    importc: "cairo_set_miter_limit", libcairo.}
-proc `miterLimit=`*(cr: Context; limit: cdouble) {.
-    importc: "cairo_set_miter_limit", libcairo.}
-proc translate*(cr: Context; tx: cdouble; ty: cdouble) {.
-    importc: "cairo_translate", libcairo.}
-proc scale*(cr: Context; sx: cdouble; sy: cdouble) {.importc: "cairo_scale",
-    libcairo.}
-proc rotate*(cr: Context; angle: cdouble) {.importc: "cairo_rotate", libcairo.}
-proc transform*(cr: Context; matrix: Matrix) {.
-    importc: "cairo_transform", libcairo.}
-proc setMatrix*(cr: Context; matrix: Matrix) {.
-    importc: "cairo_set_matrix", libcairo.}
-proc `matrix=`*(cr: Context; matrix: Matrix) {.
-    importc: "cairo_set_matrix", libcairo.}
-proc identityMatrix*(cr: Context) {.importc: "cairo_identity_matrix",
-                                        libcairo.}
-proc userToDevice*(cr: Context; x: var cdouble; y: var cdouble) {.
-    importc: "cairo_user_to_device", libcairo.}
-proc userToDeviceDistance*(cr: Context; dx: var cdouble; dy: var cdouble) {.
-    importc: "cairo_user_to_device_distance", libcairo.}
-proc deviceToUser*(cr: Context; x: var cdouble; y: var cdouble) {.
-    importc: "cairo_device_to_user", libcairo.}
-proc deviceToUserDistance*(cr: Context; dx: var cdouble; dy: var cdouble) {.
-    importc: "cairo_device_to_user_distance", libcairo.}
+proc cairo_set_dash*(cr: ptr Context00; dashes: ptr cdouble; numDashes: cint; offset: cdouble) {.importc, libcairo.}
+# TODO: use float array
+proc setDash*(cr: Context; dashes: openArray[cdouble]; offset: cdouble = 0) =
+  cairo_set_dash(cr.impl, unsafeaddr dashes[0], dashes.len.cint, offset)
+#
+#const `dash=`* = setDash
 
-proc newPath*(cr: Context) {.importc: "cairo_new_path", libcairo.}
-proc moveTo*(cr: Context; x: cdouble; y: cdouble) {.importc: "cairo_move_to",
-    libcairo.}
-proc newSubPath*(cr: Context) {.importc: "cairo_new_sub_path", libcairo.}
-proc lineTo*(cr: Context; x: cdouble; y: cdouble) {.importc: "cairo_line_to",
-    libcairo.}
-proc curveTo*(cr: Context; x1: cdouble; y1: cdouble; x2: cdouble; y2: cdouble;
-                  x3: cdouble; y3: cdouble) {.importc: "cairo_curve_to", libcairo.}
-proc arc*(cr: Context; xc: cdouble; yc: cdouble; radius: cdouble; angle1: cdouble;
-              angle2: cdouble) {.importc: "cairo_arc", libcairo.}
-proc arcNegative*(cr: Context; xc: cdouble; yc: cdouble; radius: cdouble;
-                      angle1: cdouble; angle2: cdouble) {.
-    importc: "cairo_arc_negative", libcairo.}
+proc cairo_set_miter_limit*(cr: ptr Context00; limit: cdouble) {.importc, libcairo.}
+#
+proc setMiterLimit*(cr: Context; limit: float) =
+  cairo_set_miter_limit(cr.impl, limit.cdouble)
+#
+const `miterLimit=`* = setMiterLimit
 
-proc relMoveTo*(cr: Context; dx: cdouble; dy: cdouble) {.
-    importc: "cairo_rel_move_to", libcairo.}
-proc relLineTo*(cr: Context; dx: cdouble; dy: cdouble) {.
-    importc: "cairo_rel_line_to", libcairo.}
-proc relCurveTo*(cr: Context; dx1: cdouble; dy1: cdouble; dx2: cdouble;
-                     dy2: cdouble; dx3: cdouble; dy3: cdouble) {.
-    importc: "cairo_rel_curve_to", libcairo.}
-proc rectangle*(cr: Context; x: cdouble; y: cdouble; width: cdouble;
-                    height: cdouble) {.importc: "cairo_rectangle", libcairo.}
+proc cairo_translate*(cr: ptr Context00; tx, ty: cdouble) {.importc, libcairo.}
+#
+proc translate*(cr: Context; tx, ty: float) =
+  cairo_translate(cr.impl, tx.cdouble, ty.cdouble)
 
-proc closePath*(cr: Context) {.importc: "cairo_close_path", libcairo.}
-proc pathExtents*(cr: Context; x1: var cdouble; y1: var cdouble; x2: var cdouble;
-                      y2: var cdouble) {.importc: "cairo_path_extents", libcairo.}
+proc cairo_scale*(cr: ptr Context00; sx, sy: cdouble) {.importc, libcairo.}
+#
+proc scale*(cr: Context; sx, sy: float) =
+  cairo_scale(cr.impl, sx.cdouble, sy.cdouble)
 
-proc paint*(cr: Context) {.importc: "cairo_paint", libcairo.}
-proc paintWithAlpha*(cr: Context; alpha: cdouble) {.
-    importc: "cairo_paint_with_alpha", libcairo.}
-proc paint*(cr: Context; alpha: cdouble) {.
-    importc: "cairo_paint_with_alpha", libcairo.}
-proc mask*(cr: Context; pattern: Pattern) {.importc: "cairo_mask",
-    libcairo.}
-proc maskSurface*(cr: Context; surface: Surface; surfaceX: cdouble;
-                      surfaceY: cdouble) {.importc: "cairo_mask_surface",
-    libcairo.}
-proc stroke*(cr: Context) {.importc: "cairo_stroke", libcairo.}
-proc strokePreserve*(cr: Context) {.importc: "cairo_stroke_preserve",
-                                        libcairo.}
-proc fill*(cr: Context) {.importc: "cairo_fill", libcairo.}
-proc fillPreserve*(cr: Context) {.importc: "cairo_fill_preserve", libcairo.}
-proc copyPage*(cr: Context) {.importc: "cairo_copy_page", libcairo.}
-proc showPage*(cr: Context) {.importc: "cairo_show_page", libcairo.}
+proc cairo_rotate*(cr: ptr Context00; angle: cdouble) {.importc, libcairo.}
+#
+proc rotate*(cr: Context; angle: float) =
+  cairo_rotate(cr.impl, angle.cdouble)
 
-proc inStroke*(cr: Context; x: cdouble; y: cdouble): CairoBoolT {.
-    importc: "cairo_in_stroke", libcairo.}
-proc inFill*(cr: Context; x: cdouble; y: cdouble): CairoBoolT {.
-    importc: "cairo_in_fill", libcairo.}
-proc inClip*(cr: Context; x: cdouble; y: cdouble): CairoBoolT {.
-    importc: "cairo_in_clip", libcairo.}
+proc cairo_transform*(cr: ptr Context00; matrix: Matrix) {.importc, libcairo.}
+#
+proc transform*(cr: Context; matrix: Matrix) =
+  cairo_transform(cr.impl, matrix)
 
-proc strokeExtents*(cr: Context; x1: var cdouble; y1: var cdouble;
-                        x2: var cdouble; y2: var cdouble) {.
-    importc: "cairo_stroke_extents", libcairo.}
-proc fillExtents*(cr: Context; x1: var cdouble; y1: var cdouble; x2: var cdouble;
-                      y2: var cdouble) {.importc: "cairo_fill_extents", libcairo.}
+proc cairo_set_matrix*(cr: ptr Context00; matrix: Matrix) {.importc, libcairo.}
+#
+proc setMatrix*(cr: Context; matrix: Matrix) =
+  cairo_set_matrix(cr.impl, matrix)
+#
+const `matrix=`* = setMatrix
 
-proc resetClip*(cr: Context) {.importc: "cairo_reset_clip", libcairo.}
-proc clip*(cr: Context) {.importc: "cairo_clip", libcairo.}
-proc clipPreserve*(cr: Context) {.importc: "cairo_clip_preserve", libcairo.}
-proc clipExtents*(cr: Context; x1: var cdouble; y1: var cdouble; x2: var cdouble;
-                      y2: var cdouble) {.importc: "cairo_clip_extents", libcairo.}
+proc cairo_identity_matrix*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc identityMatrix*(cr: Context) =
+  cairo_identity_matrix(cr.impl)
+#
+const setIdentityMatrix* = identityMatrix
+
+proc cairo_user_to_device*(cr: ptr Context00; x, y: var cdouble) {.importc, libcairo.}
+#
+proc userToDevice*(cr: Context; x, y: var float) =
+  var x1, y1: cdouble
+  cairo_user_to_device(cr.impl, x1, y1)
+  x = x1.float
+  y = y1.float
+
+proc cairo_user_to_device_distance*(cr: ptr Context00; dx, dy: var cdouble) {.importc, libcairo.}
+#
+proc userToDeviceDistance*(cr: Context; dx, dy: var float) =
+  var dx1, dy1: cdouble
+  cairo_user_to_device_distance(cr.impl, dx1, dy1)
+  dx = dx1.float
+  dy = dy1.float
+
+proc cairo_device_to_user*(cr: ptr Context00; x, y: var cdouble) {.importc, libcairo.}
+#
+proc deviceToUser*(cr: Context; x, y: var float) =
+  var x1, y1: cdouble
+  cairo_device_to_user(cr.impl, x1, y1)
+  x = x1.float
+  y = y1.float
+
+proc cairo_device_to_user_distance*(cr: ptr Context00; dx, dy: var cdouble) {.importc, libcairo.}
+#
+proc deviceToUserDistance*(cr: Context; dx, dy: var float) =
+  var dx1, dy1: cdouble
+  cairo_device_to_user_distance(cr.impl, dx1, dy1)
+  dx = dx1.float
+  dy = dy1.float
+
+proc cairo_new_path*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc newPath*(cr: Context) =
+  cairo_new_path(cr.impl)
+
+proc cairo_move_to*(cr: ptr Context00; x, y: cdouble) {.importc, libcairo.}
+#
+proc moveTo*(cr: Context; x, y: float) =
+  cairo_move_to(cr.impl,  x.cdouble, y.cdouble)
+
+proc cairo_new_sub_path*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc newSubPath*(cr: Context) =
+  cairo_new_sub_path(cr.impl)
+
+proc cairo_line_to*(cr: ptr Context00; x, y: cdouble) {.importc, libcairo.}
+#
+proc lineTo*(cr: Context; x, y: float) =
+  cairo_line_to(cr.impl, x.cdouble, y.cdouble)
+
+proc cairo_curve_to*(cr: ptr Context00; x1, y1, x2, y2, x3, y3: cdouble) {.importc, libcairo.}
+#
+proc curveTo*(cr: Context; x1, y1, x2, y2, x3, y3: float) =
+  cairo_curve_to(cr.impl,  x1.cdouble, y1.cdouble, x2.cdouble, y2.cdouble, x3.cdouble, y3.cdouble)
+
+proc cairo_arc*(cr: ptr Context00; xc, yc, radius, angle1, angle2: cdouble) {.importc, libcairo.}
+#
+proc arc*(cr: Context; xc, yc, radius, angle1, angle2: float) =
+  cairo_arc(cr.impl, xc.cdouble, yc.cdouble, radius.cdouble, angle1.cdouble, angle2.cdouble)
+
+proc cairo_arc_negative*(cr: ptr Context00; xc, yc, radius, angle1, angle2: cdouble) {.importc, libcairo.}
+#
+proc arcNegative*(cr: Context; xc, yc, radius, angle1, angle2: float) =
+  cairo_arc_negative(cr.impl, xc.cdouble, yc.cdouble, radius.cdouble, angle1.cdouble, angle2.cdouble)
+
+proc cairo_rel_move_to*(cr: ptr Context00; dx, dy: cdouble) {.importc, libcairo.}
+#
+proc relMoveTo*(cr: Context; dx, dy: float) =
+  cairo_rel_move_to(cr.impl, dx.cdouble, dy.cdouble)
+
+proc cairo_rel_line_to*(cr: ptr Context00; dx, dy: cdouble) {.importc, libcairo.}
+#
+proc relLineTo*(cr: Context; dx, dy: float) =
+  cairo_rel_line_to(cr.impl, dx.cdouble, dy.cdouble)
+
+proc cairo_rel_curve_to*(cr: ptr Context00; dx1, dy1, dx2, dy2, dx3, dy3: cdouble) {.importc, libcairo.}
+#
+proc relCurveTo*(cr: Context; dx1, dy1, dx2, dy2, dx3, dy3: float) =
+  cairo_rel_curve_to(cr.impl, dx1.cdouble, dy1.cdouble, dx2.cdouble, dy2.cdouble, dx3.cdouble, dy3.cdouble)
+
+proc cairo_rectangle*(cr: ptr Context00; x, y, width, height: cdouble) {.importc, libcairo.}
+#
+proc rectangle*(cr: Context; x, y, width, height: float) =
+  cairo_rectangle(cr.impl, x.cdouble, y.cdouble, width.cdouble, height.cdouble)
+
+proc cairo_close_path*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc closePath*(cr: Context) =
+  cairo_close_path(cr.impl)
+
+proc cairo_path_extents*(cr: ptr Context00; x1, y1, x2, y2: var cdouble) {.importc, libcairo.}
+#
+proc pathExtents*(cr: Context; x1, y1, x2, y2: var float) =
+  var x10, y10, x20, y20: cdouble
+  cairo_path_extents(cr.impl, x10, y10, x20, y20)
+  x1 = x10
+  y1 = y10
+  x2 = x20
+  y2 = y20
+
+proc cairo_paint*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc paint*(cr: Context) =
+  cairo_paint(cr.impl)
+
+proc cairo_paint_with_alpha*(cr: ptr Context00; alpha: cdouble) {.importc, libcairo.}
+#
+proc paintWithAlpha*(cr: Context; alpha: float) =
+  cairo_paint_with_alpha(cr.impl, alpha.cdouble)
+
+proc cairo_pattern_get_reference_count*(pattern: ptr Pattern00): cuint {.importc, libcairo.}
+#
+proc getReferenceCount*(pattern: Pattern): int =
+  cairo_pattern_get_reference_count(pattern.impl).int
+
+proc cairo_mask*(cr: ptr Context00; pattern: ptr Pattern00) {.importc, libcairo.}
+#
+proc mask*(cr: Context; pattern: Pattern) =
+  let h = cairo_pattern_get_reference_count(pattern.impl)
+  cairo_mask(cr.impl, pattern.impl)
+  assert(h == cairo_pattern_get_reference_count(pattern.impl)) # is there really no reffering?
+
+proc cairo_mask_surface*(cr: ptr Context00; surface: ptr Surface00; surface_x, surfaceY: cdouble) {.importc, libcairo.}
+#
+proc maskSurface*(cr: Context; surface: Surface; surfaceX, surfaceY: float) =
+  let h = cairo_surface_get_reference_count(surface.impl)
+  cairo_mask_surface(cr.impl, surface.impl, surfaceX.cdouble, surfaceY.cdouble)
+  assert(h == cairo_surface_get_reference_count(surface.impl))
+
+proc cairo_stroke*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc stroke*(cr: Context) =
+  cairo_stroke(cr.impl)
+
+proc cairo_stroke_preserve*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc strokePreserve*(cr: Context) =
+  cairo_stroke_preserve(cr.impl)
+
+proc cairo_fill*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc fill*(cr: Context) =
+  cairo_fill(cr. impl)
+
+proc cairo_fill_preserve*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc fillPreserve*(cr: Context) =
+  cairo_fill_preserve(cr.impl)
+
+proc cairo_copy_page*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc copyPage*(cr: Context) =
+  cairo_copy_page(cr.impl)
+
+proc cairo_show_page*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc showPage*(cr: Context) =
+  cairo_show_page(cr.impl)
+
+proc cairo_in_stroke*(cr: ptr Context00; x, y: cdouble): Bool00 {.importc, libcairo.}
+#
+proc inStroke*(cr: Context; x, y: float): bool =
+  cairo_in_stroke(cr.impl, x.cdouble, y.cdouble).bool
+
+proc cairo_in_fill*(cr: ptr Context00; x, y: cdouble): Bool00 {.importc, libcairo.}
+#
+proc inFill*(cr: Context; x, y: float): bool =
+  cairo_in_fill(cr.impl, x.cdouble, y.cdouble).bool
+
+proc cairo_in_clip*(cr: ptr Context00; x, y: cdouble): Bool00 {.importc, libcairo.}
+#
+proc inClip*(cr: Context; x, y: float): bool =
+  cairo_in_clip(cr.impl, x.cdouble, y.cdouble).bool
+
+proc cairo_stroke_extents*(cr: ptr Context00; x1, y1, x2, y2: var cdouble) {.importc, libcairo.}
+#
+proc strokeExtents*(cr: Context; x1, y1, x2, y2: var float) =
+  var x10, y10, x20, y20: cdouble
+  cairo_stroke_extents(cr.impl, x10.cdouble, y10.cdouble, x20.cdouble, y20.cdouble)
+  x1 = x10.float
+  y1 = y10.float
+  x2 = x20.float
+  y2 = y20.float
+
+proc cairo_fill_extents*(cr: ptr Context00; x1, y1, x2, y2: var cdouble) {.importc, libcairo.}
+#
+proc fillExtents*(cr: Context; x1, y1, x2, y2: var float) =
+  var x10, y10, x20, y20: cdouble
+  cairo_fill_extents(cr.impl, x10, y10, x20, y20)
+  x1 = x10.float
+  y1 = y10.float
+  x2 = x20.float
+  y2 = y20.float
+
+proc cairo_reset_clip*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc resetClip*(cr: Context) =
+  cairo_reset_clip(cr.impl)
+
+proc cairo_clip*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc clip*(cr: Context) =
+  cairo_clip(cr.impl)
+
+proc cairo_clip_preserve*(cr: ptr Context00) {.importc, libcairo.}
+#
+proc clipPreserve*(cr: Context) =
+  cairo_clip_preserve(cr.impl)
+
+proc cairo_clip_extents*(cr: ptr Context00; x1, y1, x2, y2: var cdouble) {.importc, libcairo.}
+#
+proc clipExtents*(cr: Context; x1, y1, x2, y2: var float) =
+  var x10, y10, x20, y20: cdouble
+  cairo_clip_extents(cr.impl, x10, y10, x20, y20)
+  x1 = x10.float
+  y1 = y10.float
+  x2 = x20.float
+  y2 = y20.float
+
+const getClipExtents* = clipExtents
 
 type
-  Rectangle* =  ptr RectangleObj
-  RectanglePtr* = ptr RectangleObj
-  RectangleObj* = object
+  Rectangle00* = object
     x*: cdouble
     y*: cdouble
     width*: cdouble
     height*: cdouble
 
 type
-  RectangleList* =  ptr RectangleListObj
-  RectangleListPtr* = ptr RectangleListObj
-  RectangleListObj* = object
+  Rectangle* = object
+    x*: float
+    y*: float
+    width*: float
+    height*: float
+
+type
+  RectangleList00* = object
     status*: Status
-    rectangles*: Rectangle
+    rectangles*: ptr Rectangle00
     numRectangles*: cint
 
-proc copyClipRectangleList*(cr: Context): RectangleList {.
-    importc: "cairo_copy_clip_rectangle_list", libcairo.}
-proc destroy*(rectangleList: RectangleList) {.
-    importc: "cairo_rectangle_list_destroy", libcairo.}
+proc cairo_copy_clip_rectangle_list(cr: ptr Context00): ptr RectangleList00 {.importc, libcairo.}
+
+proc cairo_rectangle_list_destroy(rectangle_list: ptr RectangleList00) {.importc, libcairo.}
+
+proc copyClipRectangleList*(cr: Context): seq[Rectangle] =
+  var h: Rectangle
+  var r = cairo_copy_clip_rectangle_list(cr.impl)
+  defer: cairo_rectangle_list_destroy(r)
+  if r.status != Status.success or r.numRectangles == 0: return nil
+  result = newSeq[Rectangle]()
+  for i in 0 ..< r.numRectangles:
+    let k = cast[ptr array[99, Rectangle00]](r.rectangles)[i]
+    h.x = k.x.float
+    h.y = k.y.float
+    h.width = k.width.float
+    h.height = k.height.float
+    result.add(h)
+
+const
+  CAIRO_TAG_DEST* = "cairo.dest"
+  CAIRO_TAG_LINK* = "Link"
+
+proc cairo_tag_begin*(cr: ptr Context00; tagName: cstring; attributes: cstring) {.importc, libcairo.}
+#
+proc tagBegin*(cr: Context; tagName: string; attributes: string) =
+  cairo_tag_begin(cr.impl, tagName, attributes)
+
+proc cairo_tag_end*(cr: ptr Context00; tagName: cstring) {.importc, libcairo.}
+#
+proc tagEnd*(cr: Context; tagName: string) =
+  cairo_tag_end(cr.impl, tagName)
 
 type
-  ScaledFont* =  ptr ScaledFontObj
-  ScaledFontPtr* = ptr ScaledFontObj
-  ScaledFontObj* = object
-
-type
-  FontFace* =  ptr FontFaceObj
-  FontFacePtr* = ptr FontFaceObj
-  FontFaceObj* = object
-
-type
-  Glyph* =  ptr GlyphObj
-  GlyphPtr* = ptr GlyphObj
-  GlyphObj* = object
+  Glyph00* = object
     index*: culong
     x*: cdouble
     y*: cdouble
 
-proc glyphAllocate*(numGlyphs: cint): Glyph {.
-    importc: "cairo_glyph_allocate", libcairo.}
-proc free*(glyphs: Glyph) {.importc: "cairo_glyph_free",
+  Glyph* = ref object  of RootRef
+    impl*: ptr Glyph00
+
+# TODO
+proc cairo_glyph_allocate*(num_glyphs: cint): ptr Glyph00 {.importc, libcairo.}
+proc cairo_glyph_free*(glyphs: ptr Glyph00) {.importc,
     libcairo.}
 
 type
-  TextCluster* =  ptr TextClusterObj
-  TextClusterPtr* = ptr TextClusterObj
-  TextClusterObj* = object
+  TextCluster00* = object
     numBytes*: cint
     numGlyphs*: cint
 
-proc textClusterAllocate*(numClusters: cint): TextCluster {.
-    importc: "cairo_text_cluster_allocate", libcairo.}
-proc free*(clusters: TextCluster) {.
-    importc: "cairo_text_cluster_free", libcairo.}
+  TextCluster* = ref object of RootRef
+    impl*: ptr TextCluster00
+
+# TODO
+proc cairo_text_cluster_allocate*(num_clusters: cint): ptr Text_cluster00 {.importc, libcairo.}
+proc cairo_text_cluster_free*(clusters: ptr Text_cluster00) {.importc, libcairo.}
 
 type
   TextClusterFlags* {.size: sizeof(cint), pure.} = enum
-    BACKWARD = 0x1
+    backward = 0x1
 
 type
-  TextExtents* =  ptr TextExtentsObj
-  TextExtentsPtr* = ptr TextExtentsObj
-  TextExtentsObj* = object
+  TextExtents* {.byRef.} = object
     xBearing*: cdouble
     yBearing*: cdouble
     width*: cdouble
@@ -405,9 +796,7 @@ type
     yAdvance*: cdouble
 
 type
-  FontExtents* =  ptr FontExtentsObj
-  FontExtentsPtr* = ptr FontExtentsObj
-  FontExtentsObj* = object
+  FontExtents* {.byRef.} = object
     ascent*: cdouble
     descent*: cdouble
     height*: cdouble
@@ -416,546 +805,929 @@ type
 
 type
   FontSlant* {.size: sizeof(cint), pure.} = enum
-    NORMAL, ITALIC, OBLIQUE
+    normal, italic, oblique
 
 type
   FontWeight* {.size: sizeof(cint), pure.} = enum
-    NORMAL, BOLD
+    normal, bold
 
 type
   SubpixelOrder* {.size: sizeof(cint), pure.} = enum
-    DEFAULT, RGB,
-    BGR, VRGB, VBGR
+    default, rgb,
+    bgr, vrgb, vbgr
 
 type
   HintStyle* {.size: sizeof(cint), pure.} = enum
-    DEFAULT, NONE, SLIGHT,
-    MEDIUM, FULL
+    default, none, slight,
+    medium, full
 
 type
   HintMetrics* {.size: sizeof(cint), pure.} = enum
-    DEFAULT, OFF, ON
+    default, off, on
 
-type
-  FontOptions* =  ptr FontOptionsObj
-  FontOptionsPtr* = ptr FontOptionsObj
-  FontOptionsObj* = object
+proc cairo_font_options_destroy*(options: ptr FontOptions00) {.importc, libcairo.}
+#
+proc fontOptionsDestroy(options: FontOptions) =
+  cairo_font_options_destroy(options.impl)
 
-proc fontOptionsCreate*(): FontOptions {.
-    importc: "cairo_font_options_create", libcairo.}
-proc copy*(original: FontOptions): FontOptions {.
-    importc: "cairo_font_options_copy", libcairo.}
-proc destroy*(options: FontOptions) {.
-    importc: "cairo_font_options_destroy", libcairo.}
-proc status*(options: FontOptions): Status {.
-    importc: "cairo_font_options_status", libcairo.}
-proc merge*(options: FontOptions;
-                           other: FontOptions) {.
-    importc: "cairo_font_options_merge", libcairo.}
-proc equal*(options: FontOptions;
-                           other: FontOptions): CairoBoolT {.
-    importc: "cairo_font_options_equal", libcairo.}
-proc hash*(options: FontOptions): culong {.
-    importc: "cairo_font_options_hash", libcairo.}
-proc setAntialias*(options: FontOptions;
-                                  antialias: Antialias) {.
-    importc: "cairo_font_options_set_antialias", libcairo.}
-proc `antialias=`*(options: FontOptions;
-                                  antialias: Antialias) {.
-    importc: "cairo_font_options_set_antialias", libcairo.}
-proc getAntialias*(options: FontOptions): Antialias {.
-    importc: "cairo_font_options_get_antialias", libcairo.}
-proc antialias*(options: FontOptions): Antialias {.
-    importc: "cairo_font_options_get_antialias", libcairo.}
-proc setSubpixelOrder*(options: FontOptions;
-                                      subpixelOrder: SubpixelOrder) {.
-    importc: "cairo_font_options_set_subpixel_order", libcairo.}
-proc `subpixelOrder=`*(options: FontOptions;
-                                      subpixelOrder: SubpixelOrder) {.
-    importc: "cairo_font_options_set_subpixel_order", libcairo.}
-proc getSubpixelOrder*(options: FontOptions): SubpixelOrder {.
-    importc: "cairo_font_options_get_subpixel_order", libcairo.}
-proc subpixelOrder*(options: FontOptions): SubpixelOrder {.
-    importc: "cairo_font_options_get_subpixel_order", libcairo.}
-proc setHintStyle*(options: FontOptions;
-                                  hintStyle: HintStyle) {.
-    importc: "cairo_font_options_set_hint_style", libcairo.}
-proc `hintStyle=`*(options: FontOptions;
-                                  hintStyle: HintStyle) {.
-    importc: "cairo_font_options_set_hint_style", libcairo.}
-proc getHintStyle*(options: FontOptions): HintStyle {.
-    importc: "cairo_font_options_get_hint_style", libcairo.}
-proc hintStyle*(options: FontOptions): HintStyle {.
-    importc: "cairo_font_options_get_hint_style", libcairo.}
-proc setHintMetrics*(options: FontOptions;
-                                    hintMetrics: HintMetrics) {.
-    importc: "cairo_font_options_set_hint_metrics", libcairo.}
-proc `hintMetrics=`*(options: FontOptions;
-                                    hintMetrics: HintMetrics) {.
-    importc: "cairo_font_options_set_hint_metrics", libcairo.}
-proc getHintMetrics*(options: FontOptions): HintMetrics {.
-    importc: "cairo_font_options_get_hint_metrics", libcairo.}
-proc hintMetrics*(options: FontOptions): HintMetrics {.
-    importc: "cairo_font_options_get_hint_metrics", libcairo.}
+# FontOptions00 is special -- there is no cairo_font_options_set_user_data() and no cairo_font_options_reference()
+proc cairo_font_options_create*(): ptr FontOptions00 {.importc, libcairo.}
+#
+proc newFontOptions*(): FontOptions =
+  new(result, fontOptionsDestroy)
+  result.impl = cairo_font_options_create()
+  ###discard cairo_font_options_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
 
-proc selectFontFace*(cr: Context; family: cstring; slant: FontSlant;
-                         weight: FontWeight) {.
-    importc: "cairo_select_font_face", libcairo.}
-proc setFontSize*(cr: Context; size: cdouble) {.
-    importc: "cairo_set_font_size", libcairo.}
-proc `fontSize=`*(cr: Context; size: cdouble) {.
-    importc: "cairo_set_font_size", libcairo.}
-proc setFontMatrix*(cr: Context; matrix: Matrix) {.
-    importc: "cairo_set_font_matrix", libcairo.}
-proc `fontMatrix=`*(cr: Context; matrix: Matrix) {.
-    importc: "cairo_set_font_matrix", libcairo.}
-proc getFontMatrix*(cr: Context; matrix: var MatrixObj) {.
-    importc: "cairo_get_font_matrix", libcairo.}
-proc setFontOptions*(cr: Context; options: FontOptions) {.
-    importc: "cairo_set_font_options", libcairo.}
-proc `fontOptions=`*(cr: Context; options: FontOptions) {.
-    importc: "cairo_set_font_options", libcairo.}
-proc getFontOptions*(cr: Context; options: var FontOptionsObj) {.
-    importc: "cairo_get_font_options", libcairo.}
-proc setFontFace*(cr: Context; fontFace: FontFace) {.
-    importc: "cairo_set_font_face", libcairo.}
-proc `fontFace=`*(cr: Context; fontFace: FontFace) {.
-    importc: "cairo_set_font_face", libcairo.}
-proc getFontFace*(cr: Context): var FontFaceObj {.
-    importc: "cairo_get_font_face", libcairo.}
-proc fontFace*(cr: Context): var FontFaceObj {.
-    importc: "cairo_get_font_face", libcairo.}
-proc setScaledFont*(cr: Context; scaledFont: ScaledFont) {.
-    importc: "cairo_set_scaled_font", libcairo.}
-proc `scaledFont=`*(cr: Context; scaledFont: ScaledFont) {.
-    importc: "cairo_set_scaled_font", libcairo.}
-proc getScaledFont*(cr: Context): ScaledFont {.
-    importc: "cairo_get_scaled_font", libcairo.}
-proc scaledFont*(cr: Context): ScaledFont {.
-    importc: "cairo_get_scaled_font", libcairo.}
-proc showText*(cr: Context; utf8: cstring) {.importc: "cairo_show_text",
-    libcairo.}
-proc showGlyphs*(cr: Context; glyphs: Glyph; numGlyphs: cint) {.
-    importc: "cairo_show_glyphs", libcairo.}
-proc showTextGlyphs*(cr: Context; utf8: cstring; utf8Len: cint;
-                         glyphs: Glyph; numGlyphs: cint;
-                         clusters: TextCluster; numClusters: cint;
-                         clusterFlags: TextClusterFlags) {.
-    importc: "cairo_show_text_glyphs", libcairo.}
-proc textPath*(cr: Context; utf8: cstring) {.importc: "cairo_text_path",
-    libcairo.}
-proc glyphPath*(cr: Context; glyphs: Glyph; numGlyphs: cint) {.
-    importc: "cairo_glyph_path", libcairo.}
-proc textExtents*(cr: Context; utf8: cstring; extents: TextExtents) {.
-    importc: "cairo_text_extents", libcairo.}
-proc glyphExtents*(cr: Context; glyphs: Glyph; numGlyphs: cint;
-                       extents: TextExtents) {.
-    importc: "cairo_glyph_extents", libcairo.}
-proc fontExtents*(cr: Context; extents: FontExtents) {.
-    importc: "cairo_font_extents", libcairo.}
+proc cairo_font_options_copy*(original: ptr FontOptions00): ptr FontOptions00 {.importc, libcairo.}
+#
+proc fontOptionsCopy*(original: FontOptions): FontOptions =
+  new(result, fontOptionsDestroy)
+  result.impl = cairo_font_options_copy(original.impl)
 
-proc reference*(fontFace: FontFace): FontFace {.
-    importc: "cairo_font_face_reference", libcairo.}
-proc destroy*(fontFace: FontFace) {.
-    importc: "cairo_font_face_destroy", libcairo.}
-proc getReferenceCount*(fontFace: FontFace): cuint {.
-    importc: "cairo_font_face_get_reference_count", libcairo.}
-proc referenceCount*(fontFace: FontFace): cuint {.
-    importc: "cairo_font_face_get_reference_count", libcairo.}
-proc status*(fontFace: FontFace): Status {.
-    importc: "cairo_font_face_status", libcairo.}
+proc cairo_font_options_status*(options: ptr FontOptions00): Status {.importc, libcairo.}
+#
+proc status*(options: FontOptions): Status =
+  cairo_font_options_status(options.impl)
+
+proc cairo_font_options_merge*(options: ptr FontOptions00; other: ptr FontOptions00) {.importc, libcairo.}
+#
+proc merge*(options: FontOptions; other: FontOptions) =
+  cairo_font_options_merge(options.impl, other.impl)
+
+proc cairo_font_options_equal*(options: ptr FontOptions00; other: ptr FontOptions00): Bool00 {.importc, libcairo.}
+#
+proc equal*(options: FontOptions; other: FontOptions): bool =
+  cairo_font_options_equal(options.impl, other.impl).bool
+
+proc cairo_font_options_hash*(options: ptr FontOptions00): culong {.importc, libcairo.}
+#
+proc hash*(options: FontOptions): int =
+  cairo_font_options_hash(options.impl).int
+
+proc cairo_font_options_set_antialias*(options: ptr FontOptions00; antialias: Antialias) {.importc, libcairo.}
+#
+proc setAntialias*(options: FontOptions; antialias: Antialias) =
+  cairo_font_options_set_antialias(options.impl, antialias)
+#
+#const `antialias=`* = setAntialias
+
+proc cairo_font_options_get_antialias*(options: ptr FontOptions00): Antialias {.importc, libcairo.}
+#
+proc getAntialias*(options: FontOptions): Antialias =
+  cairo_font_options_get_antialias(options.impl)
+#
+#const antialias* = getAntialias
+
+proc cairo_font_options_set_subpixel_order*(options: ptr FontOptions00; subpixelOrder: SubpixelOrder) {.importc, libcairo.}
+#
+proc setSubpixelOrder*(options: FontOptions; subpixelOrder: SubpixelOrder) =
+  cairo_font_options_set_subpixel_order(options.impl, subpixelOrder)
+#
+#const `subpixelOrder=`* = setSubpixelOrder
+
+proc cairo_font_options_get_subpixel_order*(options: ptr FontOptions00): SubpixelOrder {.importc, libcairo.}
+#
+proc getSubpixelOrder*(options: FontOptions): SubpixelOrder =
+  cairo_font_options_get_subpixel_order(options.impl)
+#
+#const subpixelOrder* = getSubpixelOrder
+
+proc cairo_font_options_set_hint_style*(options: ptr FontOptions00; hintStyle: HintStyle) {.importc, libcairo.}
+#
+proc setHintStyle*(options: FontOptions; hintStyle: HintStyle) =
+  cairo_font_options_set_hint_style(options.impl, hintStyle)
+#
+#const  `hintStyle=`* = setHintStyle
+
+proc cairo_font_options_get_hint_style*(options: ptr FontOptions00): HintStyle {.importc, libcairo.}
+#
+proc getHintStyle*(options: FontOptions): HintStyle =
+  cairo_font_options_get_hint_style(options.impl)
+#
+#const hintStyle* = getHintStyle
+
+proc cairo_font_options_set_hint_metrics*(options: ptr FontOptions00; hintMetrics: HintMetrics) {.importc, libcairo.}
+#
+proc setHintMetrics*(options: FontOptions; hintMetrics: HintMetrics) =
+  cairo_font_options_set_hint_metrics(options.impl, hintMetrics)
+#
+#const `hintMetrics=`* = setHintMetrics
+
+proc cairo_font_options_get_hint_metrics*(options: ptr FontOptions00): HintMetrics {.importc, libcairo.}
+#
+proc getHintMetrics*(options: FontOptions): HintMetrics =
+  cairo_font_options_get_hint_metrics(options.impl)
+#
+#const hintMetrics* = getHintMetrics
+
+proc cairo_select_font_face*(cr: ptr Context00; family: cstring; slant: FontSlant;
+  weight: FontWeight) {.importc, libcairo.}
+#
+proc selectFontFace*(cr: Context; family: string; slant: FontSlant; weight: FontWeight) =
+  cairo_select_font_face(cr.impl, family, slant, weight)
+
+proc cairo_set_font_size*(cr: ptr Context00; size: cdouble) {.importc, libcairo.}
+#
+proc setFontSize*(cr: Context; size: float) =
+  cairo_set_font_size(cr.impl, size.cdouble)
+
+proc cairo_set_font_matrix*(cr: ptr Context00; matrix: Matrix) {.importc, libcairo.}
+#
+proc setFontMatrix*(cr: Context; matrix: Matrix) =
+  cairo_set_font_matrix(cr.impl, matrix)
+#
+#const `fontMatrix=`* = setFontMatrix
+
+proc cairo_get_font_matrix*(cr: ptr Context00; matrix: var Matrix) {.importc, libcairo.}
+#
+proc getFontMatrix*(cr: Context; matrix: var Matrix) =
+  cairo_get_font_matrix(cr.impl, matrix)
+
+proc cairo_set_font_options*(cr: ptr Context00; options: ptr FontOptions00) {.importc, libcairo.}
+#
+proc setFontOptions*(cr: Context; options: FontOptions) =
+  cairo_set_font_options(cr.impl, options.impl)
+#
+#const `fontOptions=`* = setFontOptions
+
+proc cairo_get_font_options*(cr: ptr Context00; options: ptr FontOptions00) {.importc, libcairo.}
+#
+proc getFontOptions*(cr: Context; options: var FontOptions) =
+  ###new(options, fontOptionsDestroy)
+  new(options, fontOptionsDestroy)
+  options.impl = cairo_font_options_create()
+  cairo_get_font_options(cr.impl, options.impl)
+
+proc cairo_set_font_face*(cr: ptr Context00; fontFace: ptr FontFace00) {.importc, libcairo.}
+#
+proc setFontFace*(cr: Context; fontFace: FontFace) =
+  GC_ref(fontFace)
+  cairo_set_font_face(cr.impl, fontFace.impl)
+#
+#const `fontFace=` = setFontFace
+
+proc cairo_font_face_destroy*(fontFace: ptr FontFace00) {.importc, libcairo.}
+#
+proc fontFaceDestroy(fontFace: FontFace) =
+  cairo_font_face_destroy(fontFace.impl)
+
+proc cairo_font_face_get_user_data*(fontFace: ptr FontFace00;
+  key: ptr UserDataKey): pointer {.importc, libcairo.}
+#
+proc getUserData*(fontFace: FontFace; key: ptr UserDataKey): pointer =
+  cairo_font_face_get_user_data(fontFace.impl, key)
+#
+#const userData* = getUserData
+
+proc cairo_font_face_set_user_data*(fontFace: ptr FontFace00;
+  key: ptr UserDataKey; userData: pointer; destroy: DestroyFunc00): Status {.importc, libcairo.}
+#
+proc setUserData*(fontFace: FontFace; key: ptr UserDataKey; userData: pointer; destroy: DestroyFunc00): Status =
+  cairo_font_face_set_user_data(fontFace.impl, key, userData, destroy)
+
+proc cairo_font_face_reference*(fontFace: ptr FontFace00): ptr FontFace00 {.importc, libcairo.}
+#
+proc fontFaceReference*(fontFace: FontFace): FontFace =
+  discard cairo_font_face_reference(fontFace.impl)
+  return fontFace
+
+# FontFace00. This object is owned by cairo.
+proc cairo_get_font_face*(cr: ptr Context00): ptr FontFace00 {.importc, libcairo.}
+#
+proc getFontFace*(cr: Context): FontFace =
+  let h = cairo_get_font_face(cr.impl)
+  if h.isNil: return nil
+  let d = cairo_font_face_get_user_data(h, NUDK)
+  if d.isNil:
+    #assert false # may this happen?
+    new(result, fontFaceDestroy)
+    result.impl = h
+    discard cairo_font_face_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+    discard cairo_font_face_reference(result.impl)
+  else:
+    result = cast[FontFace](d)
+    assert(result.impl == h)
+    #discard cairo_font_face_reference(result.impl) # should be not necessary?
+#
+#const fontFace* = getFontFace
+
+proc cairo_set_scaled_font*(cr: ptr Context00; scaledFont: ptr ScaledFont00) {.importc, libcairo.}
+#
+proc setScaledFont*(cr: Context; scaledFont: ScaledFont) =
+  GC_ref(scaledFont)
+  cairo_set_scaled_font(cr.impl, scaledFont.impl)
+#
+#const `scaledFont=`* = setScaledFont
+
+proc cairo_scaled_font_destroy*(scaled_font: ptr ScaledFont00) {.importc, libcairo.}
+#
+proc scaledFontDestroy*(scaledFont: ScaledFont) =
+  cairo_scaled_font_destroy(scaledFont.impl)
+
+proc cairo_scaled_font_get_user_data*(scaledFont: ptr ScaledFont00;
+  key: ptr UserDataKey): pointer {.importc, libcairo.}
+#
+proc getUserData*(scaledFont: ScaledFont; key: ptr UserDataKey): pointer =
+  cairo_scaled_font_get_user_data(scaledFont.impl, key)
+
+proc cairo_scaled_font_set_user_data*(scaled_font: ptr Scaled_font00;
+  key: ptr UserDataKey; userData: pointer; destroy: DestroyFunc00): Status {.importc, libcairo.}
+#
+proc setUserData*(scaledFont: ScaledFont; key: ptr UserDataKey; userData: pointer; destroy: DestroyFunc00): Status =
+  cairo_scaled_font_set_user_data(scaledFont.impl, key, userData, destroy)
+
+proc cairo_scaled_font_reference*(scaledFont: ptr ScaledFont00): ptr ScaledFont00 {.importc, libcairo.}
+#
+proc reference*(scaledFont: ScaledFont): ScaledFont =
+  discard cairo_scaled_font_reference(scaledFont.impl)
+  return scaledFont
+
+# This object is owned by cairo.
+proc cairo_get_scaled_font*(cr: ptr Context00): ptr ScaledFont00 {.importc, libcairo.}
+#
+proc getScaledFont*(cr: Context): ScaledFont =
+  let h = cairo_get_scaled_font(cr.impl)
+  if h.isNil: return nil
+  let d = cairo_scaled_font_get_user_data(h, NUDK)
+  if d.isNil:
+    #assert false # may this happen?
+    new(result, scaledFontDestroy)
+    result.impl = h
+    discard cairo_scaled_font_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+    discard cairo_scaled_font_reference(result.impl)
+  else:
+    result = cast[ScaledFont](d)
+    assert(result.impl == h)
+    #discard cairo_scaled_font_reference(result.impl) # should be not necessary?
+#
+#const scaledFont* = getScaledFont
+
+proc cairo_show_text*(cr: ptr Context00; utf8: cstring) {.importc, libcairo.}
+#
+proc showText*(cr: Context; utf8: string) =
+  cairo_show_text(cr.impl, utf8)
+
+proc cairo_show_glyphs*(cr: ptr Context00; glyphs: ptr Glyph00; num_glyphs: cint) {.importc, libcairo.}
+#
+# TODO
+#proc showGlyphs*(cr: Context; glyphs: Glyph00; num_glyphs: cint)
+#proc cairo_show_glyphs*(cr: ptr Context00; glyphs: ptr Glyph00; num_glyphs: cint)
+
+proc cairo_show_text_glyphs*(cr: ptr Context00; utf8: cstring; utf8_len: cint;
+                         glyphs: ptr Glyph00; numGlyphs: cint;
+                         clusters: ptr TextCluster00; numClusters: cint;
+                         clusterFlags: TextClusterFlags) {.importc, libcairo.}
+
+proc cairo_text_path*(cr: ptr Context00; utf8: cstring) {.importc,libcairo.}
+#
+proc textPath*(cr: Context; utf8: string) =
+  cairo_text_path(cr.impl, utf8)
+
+# TODO
+proc cairo_glyph_path*(cr: ptr Context00; glyphs: ptr Glyph00; num_glyphs: cint) {.importc, libcairo.}
+# TODO
+proc cairo_text_extents*(cr: ptr Context00; utf8: cstring; extents: var TextExtents) {.importc, libcairo.}
+#
+proc textExtents*(cr: Context; utf8: string; extents: var TextExtents) =
+  cairo_text_extents(cr.impl, utf8, extents)
+#
+const getTextExtents* = textExtents
+
+# TODO
+proc cairo_glyph_extents*(cr: ptr Context00; glyphs: ptr Glyph00; num_glyphs: cint;
+                       extents: var TextExtents) {.importc, libcairo.}
+
+proc cairo_font_extents*(cr: ptr Context00; extents: var FontExtents) {.importc, libcairo.}
+#
+proc fontExtents*(cr: Context; extents: var FontExtents) =
+  cairo_font_extents(cr.impl, extents)
+#
+const getFontExtents* = fontExtents
+
+proc cairo_font_face_get_reference_count*(font_face: ptr FontFace00): cuint {.importc, libcairo.}
+#
+proc getReferenceCount*(fontFace: FontFace): int =
+  cairo_font_face_get_reference_count(fontFace.impl).int
+
+proc cairo_font_face_status*(font_face: ptr FontFace00): Status {.importc, libcairo.}
+#
+proc status*(fontFace: FontFace): Status =
+  cairo_font_face_status(fontFace.impl)
+#
+#const getStatus* = status # does not compile
 
 type
   FontType* {.size: sizeof(cint), pure.} = enum
-    TOY, FT, WIN32,
-    QUARTZ, USER
+    toy, ft, win32,
+    quartz, user
 
-proc getType*(fontFace: FontFace): FontType {.
-    importc: "cairo_font_face_get_type", libcairo.}
+proc cairo_font_face_get_type*(fontFace: ptr FontFace00): FontType {.importc, libcairo.}
+#
+proc getType*(fontFace: FontFace): FontType =
+  cairo_font_face_get_type(fontFace.impl)
 
-proc type*(fontFace: FontFace): FontType {.
-    importc: "cairo_font_face_get_type", libcairo.}
-proc getUserData*(fontFace: FontFace;
-                              key: UserDataKey): pointer {.
-    importc: "cairo_font_face_get_user_data", libcairo.}
-proc userData*(fontFace: FontFace;
-                              key: UserDataKey): pointer {.
-    importc: "cairo_font_face_get_user_data", libcairo.}
-proc setUserData*(fontFace: FontFace;
-                              key: UserDataKey; userData: pointer;
-                              destroy: CairoDestroyFuncT): Status {.
-    importc: "cairo_font_face_set_user_data", libcairo.}
+proc cairo_scaled_font_create*(fontFace: ptr FontFace00;
+  fontMatrix: Matrix; ctm: Matrix; options: ptr FontOptions00): ptr ScaledFont00 {.importc, libcairo.}
+#
+proc scaledFontCreate*(fontFace: FontFace; fontMatrix: Matrix; ctm: Matrix; options: FontOptions): ScaledFont =
+  new(result, scaledFontDestroy)
+  GC_ref(fontFace)
+  result.impl = cairo_scaled_font_create(fontFace.impl, fontMatrix, ctm, options.impl)
+  discard cairo_scaled_font_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
 
-proc scaledFontCreate*(fontFace: FontFace;
-                           fontMatrix: Matrix; ctm: Matrix;
-                           options: FontOptions): ScaledFont {.
-    importc: "cairo_scaled_font_create", libcairo.}
-proc reference*(scaledFont: ScaledFont): ScaledFont {.
-    importc: "cairo_scaled_font_reference", libcairo.}
-proc destroy*(scaledFont: ScaledFont) {.
-    importc: "cairo_scaled_font_destroy", libcairo.}
-proc getReferenceCount*(scaledFont: ScaledFont): cuint {.
-    importc: "cairo_scaled_font_get_reference_count", libcairo.}
-proc referenceCount*(scaledFont: ScaledFont): cuint {.
-    importc: "cairo_scaled_font_get_reference_count", libcairo.}
-proc status*(scaledFont: ScaledFont): Status {.
-    importc: "cairo_scaled_font_status", libcairo.}
-proc getType*(scaledFont: ScaledFont): FontType {.
-    importc: "cairo_scaled_font_get_type", libcairo.}
-proc type*(scaledFont: ScaledFont): FontType {.
-    importc: "cairo_scaled_font_get_type", libcairo.}
-proc getUserData*(scaledFont: ScaledFont;
-                                key: UserDataKey): pointer {.
-    importc: "cairo_scaled_font_get_user_data", libcairo.}
-proc userData*(scaledFont: ScaledFont;
-                                key: UserDataKey): pointer {.
-    importc: "cairo_scaled_font_get_user_data", libcairo.}
-proc setUserData*(scaledFont: ScaledFont;
-                                key: UserDataKey; userData: pointer;
-                                destroy: CairoDestroyFuncT): Status {.
-    importc: "cairo_scaled_font_set_user_data", libcairo.}
-proc extents*(scaledFont: ScaledFont;
-                            extents: FontExtents) {.
-    importc: "cairo_scaled_font_extents", libcairo.}
-proc textExtents*(scaledFont: ScaledFont; utf8: cstring;
-                                extents: TextExtents) {.
-    importc: "cairo_scaled_font_text_extents", libcairo.}
-proc glyphExtents*(scaledFont: ScaledFont;
-                                 glyphs: Glyph; numGlyphs: cint;
-                                 extents: TextExtents) {.
-    importc: "cairo_scaled_font_glyph_extents", libcairo.}
-proc textToGlyphs*(scaledFont: ScaledFont; x: cdouble;
-                                 y: cdouble; utf8: cstring; utf8Len: cint;
-                                 glyphs: var Glyph; numGlyphs: var cint;
-                                 clusters: var TextCluster;
-                                 numClusters: var cint;
-                                 clusterFlags: var TextClusterFlags): Status {.
-    importc: "cairo_scaled_font_text_to_glyphs", libcairo.}
-proc getFontFace*(scaledFont: ScaledFont): FontFace {.
-    importc: "cairo_scaled_font_get_font_face", libcairo.}
-proc fontFace*(scaledFont: ScaledFont): FontFace {.
-    importc: "cairo_scaled_font_get_font_face", libcairo.}
-proc getFontMatrix*(scaledFont: ScaledFont;
-                                  fontMatrix: var MatrixObj) {.
-    importc: "cairo_scaled_font_get_font_matrix", libcairo.}
-proc getCtm*(scaledFont: ScaledFont; ctm: Matrix) {.
-    importc: "cairo_scaled_font_get_ctm", libcairo.}
-proc getScaleMatrix*(scaledFont: ScaledFont;
-                                   scaleMatrix: var MatrixObj) {.
-    importc: "cairo_scaled_font_get_scale_matrix", libcairo.}
-proc getFontOptions*(scaledFont: ScaledFont;
-                                   options: var FontOptionsObj) {.
-    importc: "cairo_scaled_font_get_font_options", libcairo.}
+proc cairo_scaled_font_get_reference_count*(scaledFont: ptr ScaledFont00): cuint {.importc, libcairo.}
+#
+proc getReferenceCount*(scaledFont: ScaledFont): int =
+  cairo_scaled_font_get_reference_count(scaledFont.impl).int
+#
+#const referenceCount* = getReferenceCount
 
-proc toyFontFaceCreate*(family: cstring; slant: FontSlant;
-                            weight: FontWeight): FontFace {.
-    importc: "cairo_toy_font_face_create", libcairo.}
-proc toyFontFaceGetFamily*(fontFace: FontFace): cstring {.
-    importc: "cairo_toy_font_face_get_family", libcairo.}
-proc toyFontFaceGetSlant*(fontFace: FontFace): FontSlant {.
-    importc: "cairo_toy_font_face_get_slant", libcairo.}
-proc toyFontFaceGetWeight*(fontFace: FontFace): FontWeight {.
-    importc: "cairo_toy_font_face_get_weight", libcairo.}
+proc cairo_scaled_font_status*(scaledFont: ptr ScaledFont00): Status {.importc, libcairo.}
+#
+proc status*(scaledFont: ScaledFont): Status =
+  cairo_scaled_font_status(scaledFont.impl)
+#
+#const getStatus* = status
 
-proc userFontFaceCreate*(): FontFace {.
-    importc: "cairo_user_font_face_create", libcairo.}
+proc cairo_scaled_font_get_type*(scaledFont: ptr ScaledFont00): FontType {.importc, libcairo.}
+#
+proc getType*(scaledFont: ScaledFont): FontType =
+  cairo_scaled_font_get_type(scaledFont.impl)
+
+proc cairo_scaled_font_extents*(scaledFont: ptr ScaledFont00; extents: var FontExtents) {.importc, libcairo.}
+#
+proc extents*(scaledFont: ScaledFont; extents: var FontExtents) =
+  cairo_scaled_font_extents(scaledFont.impl, extents)
+#
+#const getExtents* = extents # does not compile
+
+proc cairo_scaled_font_text_extents*(scaledFont: ptr ScaledFont00; utf8: cstring;
+  extents: var TextExtents) {.importc, libcairo.}
+#
+proc textExtents*(scaledFont: ScaledFont; utf8: string; extents: var TextExtents) =
+  cairo_scaled_font_text_extents(scaledFont.impl, utf8, extents)
+#
+#const getTextExtents* = textExtents
+
+#TODO
+proc cairo_scaled_font_glyph_extents*(scaled_font: ptr Scaled_font00;
+  glyphs: ptr Glyph00; numGlyphs: cint; extents: var TextExtents) {.importc, libcairo.}
+#
+#proc cairo_scaled_font_glyph_extents*(scaled_font: ptr Scaled_font00; glyphs: ptr Glyph00; numGlyphs: cint; extents: var TextExtents)
+#proc cairo_scaled_font_glyph_extents*(scaled_font: ptr Scaled_font00; glyphs: ptr Glyph00; numGlyphs: cint; extents: var TextExtents)
+
+#TODO
+proc cairo_scaled_font_text_to_glyphs*(scaled_font: ptr Scaled_font00; x, y: cdouble;
+  utf8: cstring; utf8Len: cint; glyphs: ptr ptr Glyph00; numGlyphs: var cint;
+  clusters: ptr ptr TextCluster00; numClusters: var cint; clusterFlags: var TextClusterFlags): Status {.importc, libcairo.}
+
+proc cairo_scaled_font_get_font_face*(scaled_font: ptr ScaledFont00): ptr FontFace00 {.importc, libcairo.}
+#
+proc getFontFace*(scaledFont: ScaledFont): FontFace =
+  let h =cairo_scaled_font_get_font_face(scaledFont.impl)
+  let d = cairo_font_face_get_user_data(h, NUDK)
+  if d.isNil:
+    assert false # may this happen?
+    new(result, fontFaceDestroy)
+    result.impl = h
+  else:
+    result = cast[FontFace](d)
+    assert(result.impl == h)
+
+proc cairo_scaled_font_get_font_matrix*(scaledFont: ptr ScaledFont00;
+  fontMatrix: var Matrix) {.importc, libcairo.}
+#
+proc getFontMatrix*(scaledFont: ScaledFont; fontMatrix: var Matrix) =
+  cairo_scaled_font_get_font_matrix(scaledFont.impl, fontMatrix)
+#
+#const fontMatrix* = getFontMatrix
+
+proc cairo_scaled_font_get_ctm*(scaledFont: ptr ScaledFont00; ctm: var Matrix) {.importc, libcairo.}
+#
+proc getCtm*(scaledFont: ScaledFont; ctm: var Matrix) =
+  cairo_scaled_font_get_ctm(scaledFont.impl, ctm)
+#
+#const ctm* = getCtm
+
+proc cairo_scaled_font_get_scale_matrix*(scaledFont: ptr ScaledFont00;
+  scaleMatrix: var Matrix) {.importc, libcairo.}
+#
+proc getScaleMatrix*(scaledFont: ScaledFont; scaleMatrix: var Matrix) =
+  cairo_scaled_font_get_scale_matrix(scaledFont.impl, scaleMatrix)
+#
+#const scaleMatrix* = getScaleMatrix
+
+# FontOptions00 is special -- there is no cairo_font_options_set_user_data() and no cairo_font_options_reference()
+proc cairo_scaled_font_get_font_options*(scaledFont: ptr ScaledFont00;
+  options: ptr FontOptions00) {.importc, libcairo.}
+#
+proc getFontOptions*(scaledFont: ScaledFont; options: var FontOptions) =
+  new(options, fontOptionsDestroy)
+  options.impl = cairo_font_options_create()
+  cairo_scaled_font_get_font_options(scaledFont.impl, options.impl)
+#
+#const fontOptions* = getFontOptions
+
+proc cairo_toy_font_face_create*(family: cstring; slant: FontSlant;
+  weight: FontWeight): ptr FontFace00 {.importc, libcairo.}
+#
+proc toyFontFaceCreate*(family: string; slant: FontSlant; weight: FontWeight): FontFace =
+  new(result, fontFaceDestroy)
+  result.impl = cairo_toy_font_face_create(family, slant, weight)
+  discard cairo_font_face_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+# returns: The family name. This string is owned by the font face and remains valid as long as the font face is alive (referenced).
+proc cairo_toy_font_face_get_family*(fontFace: ptr Font_face00): cstring {.importc, libcairo.}
+#
+proc toyFontFaceGetFamily*(fontFace: FontFace): string =
+  $cairo_toy_font_face_get_family(fontFace.impl)
+
+proc cairo_toy_font_face_get_slant*(fontFace: ptr FontFace00): FontSlant {.importc, libcairo.}
+#
+proc toyFontFaceGetSlant*(fontFace: FontFace): FontSlant =
+  cairo_toy_font_face_get_slant(fontFace.impl)
+
+proc cairo_toy_font_face_get_weight*(fontFace: ptr FontFace00): FontWeight {.importc, libcairo.}
+#
+proc toyFontFaceGetWeight*(fontFace: FontFace): FontWeight =
+  cairo_toy_font_face_get_weight(fontFace.impl)
+
+proc cairo_user_font_face_create*(): ptr FontFace00 {.importc, libcairo.}
+#
+proc userFontFaceCreate*(): FontFace =
+  new(result, fontFaceDestroy)
+  result.impl = cairo_user_font_face_create()
+  # there is no cairo_user_font_face_set_user_data()
+  discard cairo_font_face_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
 
 type
-  CairoUserScaledFontInitFuncT* = proc (scaledFont: ScaledFont;
-                                     cr: Context; extents: FontExtents): Status {.cdecl.}
+  UserScaledFontInitFunc00* = proc (scaledFont: ptr ScaledFont00;
+                                     cr: ptr Context00; extents: ptr FontExtents): Status {.cdecl.}
 
 type
-  CairoUserScaledFontRenderGlyphFuncT* = proc (scaledFont: ScaledFont;
-      glyph: culong; cr: Context; extents: TextExtents): Status {.cdecl.}
+  UserScaledFontRenderGlyphFunc00* = proc (scaledFont: ptr ScaledFont00;
+      glyph: culong; cr: ptr Context00; extents: ptr TextExtents): Status {.cdecl.}
 
 type
-  CairoUserScaledFontTextToGlyphsFuncT* = proc (scaledFont: ScaledFont;
-      utf8: cstring; utf8Len: cint; glyphs: var Glyph; numGlyphs: var cint;
-      clusters: var TextCluster; numClusters: var cint;
+  UserScaledFontTextToGlyphsFunc00* = proc (scaledFont: ptr ScaledFont00;
+      utf8: cstring; utf8Len: cint; glyphs: ptr ptr Glyph00; numGlyphs: var cint;
+      clusters: ptr ptr TextCluster00; numClusters: var cint;
       clusterFlags: var TextClusterFlags): Status {.cdecl.}
 
 type
-  CairoUserScaledFontUnicodeToGlyphFuncT* = proc (scaledFont: ScaledFont;
+  UserScaledFontUnicodeToGlyphFunc00* = proc (scaledFont: ptr ScaledFont00;
       unicode: culong; glyphIndex: var culong): Status {.cdecl.}
 
-proc userFontFaceSetInitFunc*(fontFace: FontFace;
-                                  initFunc: CairoUserScaledFontInitFuncT) {.
-    importc: "cairo_user_font_face_set_init_func", libcairo.}
-proc userFontFaceSetRenderGlyphFunc*(fontFace: FontFace;
-    renderGlyphFunc: CairoUserScaledFontRenderGlyphFuncT) {.
-    importc: "cairo_user_font_face_set_render_glyph_func", libcairo.}
-proc userFontFaceSetTextToGlyphsFunc*(fontFace: FontFace;
-    textToGlyphsFunc: CairoUserScaledFontTextToGlyphsFuncT) {.
-    importc: "cairo_user_font_face_set_text_to_glyphs_func", libcairo.}
-proc userFontFaceSetUnicodeToGlyphFunc*(fontFace: FontFace;
-    unicodeToGlyphFunc: CairoUserScaledFontUnicodeToGlyphFuncT) {.
-    importc: "cairo_user_font_face_set_unicode_to_glyph_func", libcairo.}
+proc cairo_user_font_face_set_init_func*(fontFace: ptr FontFace00;
+  initFunc: UserScaledFontInitFunc00) {.importc, libcairo.}
+#
+proc userFontFaceSetInitFunc*(fontFace: FontFace; initFunc: UserScaledFontInitFunc00) =
+  cairo_user_font_face_set_init_func(fontFace.impl, initFunc)
 
-proc userFontFaceGetInitFunc*(fontFace: FontFace): CairoUserScaledFontInitFuncT {.
-    importc: "cairo_user_font_face_get_init_func", libcairo.}
-proc userFontFaceGetRenderGlyphFunc*(fontFace: FontFace): CairoUserScaledFontRenderGlyphFuncT {.
-    importc: "cairo_user_font_face_get_render_glyph_func", libcairo.}
-proc userFontFaceGetTextToGlyphsFunc*(fontFace: FontFace): CairoUserScaledFontTextToGlyphsFuncT {.
-    importc: "cairo_user_font_face_get_text_to_glyphs_func", libcairo.}
-proc userFontFaceGetUnicodeToGlyphFunc*(fontFace: FontFace): CairoUserScaledFontUnicodeToGlyphFuncT {.
-    importc: "cairo_user_font_face_get_unicode_to_glyph_func", libcairo.}
+proc cairo_user_font_face_set_render_glyph_func*(fontFace: ptr FontFace00;
+  renderGlyphFunc: UserScaledFontRenderGlyphFunc00) {.importc, libcairo.}
+#
+proc userFontFaceSetRenderGlyphFunc*(fontFace: FontFace; renderGlyphFunc: UserScaledFontRenderGlyphFunc00) =
+  cairo_user_font_face_set_render_glyph_func(fontFace.impl, renderGlyphFunc)
 
-proc getOperator*(cr: Context): Operator {.
-    importc: "cairo_get_operator", libcairo.}
+proc cairo_user_font_face_set_text_to_glyphs_func*(fontFace: ptr FontFace00;
+  textToGlyphsFunc: UserScaledFontTextToGlyphsFunc00) {.importc, libcairo.}
+#
+proc userFontFaceSetTextToGlyphsFunc*(fontFace: FontFace; textToGlyphsFunc: UserScaledFontTextToGlyphsFunc00) =
+  cairo_user_font_face_set_text_to_glyphs_func(fontFace.impl, textToGlyphsFunc)
 
-proc operator*(cr: Context): Operator {.
-    importc: "cairo_get_operator", libcairo.}
-proc getSource*(cr: Context): Pattern {.importc: "cairo_get_source",
-    libcairo.}
-proc source*(cr: Context): Pattern {.importc: "cairo_get_source",
-    libcairo.}
-proc getTolerance*(cr: Context): cdouble {.importc: "cairo_get_tolerance",
-    libcairo.}
-proc tolerance*(cr: Context): cdouble {.importc: "cairo_get_tolerance",
-    libcairo.}
-proc getAntialias*(cr: Context): Antialias {.
-    importc: "cairo_get_antialias", libcairo.}
-proc antialias*(cr: Context): Antialias {.
-    importc: "cairo_get_antialias", libcairo.}
-proc hasCurrentPoint*(cr: Context): CairoBoolT {.
-    importc: "cairo_has_current_point", libcairo.}
-proc getCurrentPoint*(cr: Context; x: var cdouble; y: var cdouble) {.
-    importc: "cairo_get_current_point", libcairo.}
-proc getFillRule*(cr: Context): FillRule {.
-    importc: "cairo_get_fill_rule", libcairo.}
-proc fillRule*(cr: Context): FillRule {.
-    importc: "cairo_get_fill_rule", libcairo.}
-proc getLineWidth*(cr: Context): cdouble {.importc: "cairo_get_line_width",
-    libcairo.}
-proc lineWidth*(cr: Context): cdouble {.importc: "cairo_get_line_width",
-    libcairo.}
-proc getLineCap*(cr: Context): LineCap {.importc: "cairo_get_line_cap",
-    libcairo.}
-proc lineCap*(cr: Context): LineCap {.importc: "cairo_get_line_cap",
-    libcairo.}
-proc getLineJoin*(cr: Context): LineJoin {.
-    importc: "cairo_get_line_join", libcairo.}
-proc lineJoin*(cr: Context): LineJoin {.
-    importc: "cairo_get_line_join", libcairo.}
-proc getMiterLimit*(cr: Context): cdouble {.importc: "cairo_get_miter_limit",
-    libcairo.}
-proc miterLimit*(cr: Context): cdouble {.importc: "cairo_get_miter_limit",
-    libcairo.}
-proc getDashCount*(cr: Context): cint {.importc: "cairo_get_dash_count",
-    libcairo.}
-proc dashCount*(cr: Context): cint {.importc: "cairo_get_dash_count",
-    libcairo.}
-proc getDash*(cr: Context; dashes: var cdouble; offset: var cdouble) {.
-    importc: "cairo_get_dash", libcairo.}
-proc getMatrix*(cr: Context; matrix: var MatrixObj) {.
-    importc: "cairo_get_matrix", libcairo.}
-proc getTarget*(cr: Context): Surface {.importc: "cairo_get_target",
-    libcairo.}
-proc target*(cr: Context): Surface {.importc: "cairo_get_target",
-    libcairo.}
-proc getGroupTarget*(cr: Context): Surface {.
-    importc: "cairo_get_group_target", libcairo.}
-proc groupTarget*(cr: Context): Surface {.
-    importc: "cairo_get_group_target", libcairo.}
+proc cairo_user_font_face_set_unicode_to_glyph_func*(fontFace: ptr FontFace00;
+  unicodeToGlyphFunc: UserScaledFontUnicodeToGlyphFunc00) {.importc, libcairo.}
+#
+proc userFontFaceSetUnicodeToGlyphFunc*(fontFace: FontFace; unicodeToGlyphFunc: UserScaledFontUnicodeToGlyphFunc00) =
+  cairo_user_font_face_set_unicode_to_glyph_func(fontFace.impl, unicodeToGlyphFunc)
 
-type
-  PathDataType* {.size: sizeof(cint), pure.} = enum
-    MOVE_TO, LINE_TO, CURVE_TO,
-    CLOSE_PATH
+proc cairo_user_font_face_get_init_func*(fontFace: ptr FontFace00):
+  User_scaled_font_init_func00 {.importc, libcairo.}
+#
+proc userFontFaceGetInitFunc*(fontFace: FontFace): UserScaledFontInitFunc00 =
+  cairo_user_font_face_get_init_func(fontFace.impl)
 
-type
-  INNER_C_STRUCT_2628513549860159921* = object
-    `type`*: PathDataType
-    length*: cint
+proc cairo_user_font_face_get_render_glyph_func*(fontFace: ptr FontFace00):
+  User_scaled_font_render_glyph_func00 {.importc, libcairo.}
+#
+proc userFontFaceGetRenderGlyphFunc*(fontFace: FontFace): UserScaledFontRenderGlyphFunc00 =
+  cairo_user_font_face_get_render_glyph_func(fontFace.impl)
 
-  INNER_C_STRUCT_8518362554880751541* = object
-    x*: cdouble
-    y*: cdouble
+proc cairo_user_font_face_get_text_to_glyphs_func*(fontFace: ptr FontFace00):
+  User_scaled_font_text_to_glyphs_func00 {.importc, libcairo.}
+#
+proc userFontFaceGetTextToGlyphsFunc*(fontFace: FontFace): UserScaledFontTextToGlyphsFunc00 =
+  cairo_user_font_face_get_text_to_glyphs_func(fontFace.impl)
 
-  CairoPathDataT* = object {.union.}
-    header*: INNER_C_STRUCT_2628513549860159921
-    point*: INNER_C_STRUCT_8518362554880751541
+proc cairo_user_font_face_get_unicode_to_glyph_func*(fontFace: ptr FontFace00):
+  User_scaled_font_unicode_to_glyph_func00 {.importc, libcairo.}
+#
+proc userFontFaceGetUnicodeToGlyphFunc*(fontFace: FontFace): UserScaledFontUnicodeToGlyphFunc00 =
+  cairo_user_font_face_get_unicode_to_glyph_func(fontFace.impl)
 
-type
-  Path* =  ptr PathObj
-  PathPtr* = ptr PathObj
-  PathObj* = object
-    status*: Status
-    data*: ptr CairoPathDataT
-    numData*: cint
+proc cairo_get_operator*(cr: ptr Context00): Operator {.importc, libcairo.}
+#
+proc getOperator*(cr: Context): Operator =
+  cairo_get_operator(cr.impl)
+#
+#const operator* = getOperator
 
-proc copyPath*(cr: Context): Path {.importc: "cairo_copy_path",
-    libcairo.}
-proc copyPathFlat*(cr: Context): Path {.
-    importc: "cairo_copy_path_flat", libcairo.}
-proc appendPath*(cr: Context; path: Path) {.
-    importc: "cairo_append_path", libcairo.}
-proc destroy*(path: Path) {.importc: "cairo_path_destroy",
-    libcairo.}
+proc cairo_pattern_get_user_data*(pattern: ptr Pattern00; key: ptr UserDataKey): pointer {.importc, libcairo.}
+#
+proc getUserData*(pattern: Pattern; key: ptr UserDataKey): pointer =
+  cairo_pattern_get_user_data(pattern.impl, key)
 
-proc status*(cr: Context): Status {.importc: "cairo_status", libcairo.}
-proc toString*(status: Status): cstring {.
-    importc: "cairo_status_to_string", libcairo.}
+proc cairo_get_source*(cr: ptr Context00): ptr Pattern00 {.importc, libcairo.}
+#
+proc getSource*(cr: Context): Pattern =
+  let h = cairo_get_source(cr.impl)
+  let d = cairo_pattern_get_user_data(h, NUDK)
+  if d.isNil:
+    #assert false # may this happen?
+    new(result, patternDestroy)
+    result.impl = h
+  else:
+    result = cast[Pattern](d)
+    assert(result.impl == h)
+#
+#const source* = getSource
 
-proc reference*(device: Device): Device {.
-    importc: "cairo_device_reference", libcairo.}
+proc cairo_get_tolerance*(cr: ptr Context00): cdouble {.importc, libcairo.}
+#
+proc getTolerance*(cr: Context): float =
+  cairo_get_tolerance(cr.impl).float
+#
+#const tolerance* = getTolerance
+
+proc cairo_get_antialias*(cr: ptr Context00): Antialias {.importc, libcairo.}
+#
+proc getAntialias*(cr: Context): Antialias =
+  cairo_get_antialias(cr.impl)
+#
+#const antialias* = getAntialias
+
+proc cairo_has_current_point*(cr: ptr Context00): Bool00 {.importc, libcairo.}
+#
+proc hasCurrentPoint*(cr: Context): bool =
+  cairo_has_current_point(cr.impl).bool
+
+proc cairo_get_current_point*(cr: ptr Context00; x, y: var cdouble) {.importc, libcairo.}
+#
+proc getCurrentPoint*(cr: Context; x, y: var float) =
+  var x0, y0: cdouble
+  cairo_get_current_point(cr.impl, x0, y0)
+  x = x0.float
+  y = y0.float
+
+proc cairo_get_fill_rule*(cr: ptr Context00): FillRule {.importc, libcairo.}
+#
+proc getFillRule*(cr: Context): FillRule =
+  cairo_get_fill_rule(cr.impl)
+#
+#const fillRule* = getFillRule
+
+proc cairo_get_line_width*(cr: ptr Context00): cdouble {.importc, libcairo.}
+#
+proc getLineWidth*(cr: Context): float =
+  cairo_get_line_width(cr.impl).float
+#
+const lineWidth* = getLineWidth
+
+proc cairo_get_line_cap*(cr: ptr Context00): LineCap {.importc, libcairo.}
+#
+proc getLineCap*(cr: Context): LineCap =
+  cairo_get_line_cap(cr.impl)
+#
+const lineCap* = getLineCap
+
+proc cairo_get_line_join*(cr: ptr Context00): LineJoin {.importc, libcairo.}
+#
+proc getLineJoin*(cr: Context): LineJoin =
+  cairo_get_line_join(cr.impl)
+#
+const lineJoin* = getLineJoin
+
+proc cairo_get_miter_limit*(cr: ptr Context00): cdouble {.importc, libcairo.}
+#
+proc getMiterLimit*(cr: Context): float =
+  cairo_get_miter_limit(cr.impl).float
+#
+#const miterLimit* = getMiterLimit
+
+proc cairo_get_dash_count*(cr: ptr Context00): cint {.importc, libcairo.}
+#
+proc getDashCount*(cr: Context): int =
+  cairo_get_dash_count(cr.impl).int
+#
+#const dashCount* = getDashCount
+
+# TODO
+#proc cairo_get_dash*(cr: ptr Context00; dashes, offset: var cdouble) {.importc, libcairo.}
+
+proc cairo_get_matrix*(cr: ptr Context00; matrix: var Matrix) {.importc, libcairo.}
+#
+proc getMatrix*(cr: Context; matrix: var Matrix) =
+  cairo_get_matrix(cr.impl, matrix)
+#
+#const matrix* = getMatrix
+
+proc cairo_surface_destroy*(surface: ptr Surface00) {.importc, libcairo.}
+#
+proc surfaceDestroy(surface: Surface) =
+  cairo_surface_destroy(surface.impl)
+
+proc cairo_surface_get_user_data*(surface: ptr Surface00; key: ptr UserDataKey): pointer {.importc, libcairo.}
+#
+proc getUserData*(surface: Surface; key: ptr UserDataKey): pointer =
+  cairo_surface_get_user_data(surface.impl, key)
+
+proc cairo_surface_set_user_data*(surface: ptr Surface00;
+  key: ptr UserDataKey; userData: pointer; destroy: DestroyFunc00): Status {.importc, libcairo.}
+#
+proc setUserData*(surface: Surface; key: ptr UserDataKey; userData: pointer; destroy: DestroyFunc00): Status =
+  cairo_surface_set_user_data(surface.impl, key, userData, destroy)
+
+proc cairo_get_target*(cr: ptr Context00): ptr Surface00 {.importc, libcairo.}
+#
+proc getTarget*(cr: Context): Surface =
+  let h = cairo_get_target(cr.impl)
+  if h.isNil: return nil
+  let d = cairo_surface_get_user_data(h, NUDK)
+  if d.isNil:
+    assert false # may this happen?
+    new(result, surfaceDestroy)
+    result.impl = h
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+    discard cairo_surface_reference(result.impl)
+  else:
+    result = cast[Surface](d)
+    assert(result.impl == h)
+    #discard cairo_surface_reference(result.impl) # should be not necessary?
+
+proc cairo_get_group_target*(cr: ptr Context00): ptr Surface00 {.importc, libcairo.}
+#
+proc getGroupTarget*(cr: Context): Surface =
+  let h = cairo_get_group_target(cr.impl)
+  if h.isNil: return nil
+  let d = cairo_surface_get_user_data(h, NUDK)
+  if d.isNil:
+    #assert false # may this happen?
+    new(result, surfaceDestroy)
+    result.impl = h
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+    discard cairo_surface_reference(result.impl)
+  else:
+    result = cast[Surface](d)
+    assert(result.impl == h)
+    #discard cairo_surface_reference(result.impl) # should be not necessary?
+
+proc cairo_path_destroy*(path: ptr Path00) {.importc, libcairo.}
+#
+proc pathDestroy(path: Path) =
+  cairo_path_destroy(path.impl)
+
+# path is not ref counted, and there is no airo_path_set_user_data()
+proc cairo_copy_path*(cr: ptr Context00): ptr Path00 {.importc, libcairo.}
+#
+proc copyPath*(cr: Context): Path =
+  new(result, pathDestroy)
+  result.impl = cairo_copy_path(cr.impl)
+  #discard cairo_path_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_copy_path_flat*(cr: ptr Context00): ptr Path00 {.importc, libcairo.}
+#
+proc copyPathFlat*(cr: Context): Path =
+  new(result, pathDestroy)
+  result.impl = cairo_copy_path_flat(cr.impl)
+
+proc cairo_append_path*(cr: ptr Context00; path: ptr Path00) {.importc, libcairo.}
+#
+proc appendPath*(cr: Context; path: Path) =
+  cairo_append_path(cr.impl, path.impl)
+
+proc cairo_status*(cr: ptr Context00): Status {.importc, libcairo.}
+#
+proc status*(cr: Context): Status =
+  cairo_status(cr.impl)
+#
+#const getStatus* = status
+
+proc cairo_status_to_string*(status: Status): cstring {.importc, libcairo.}
+#
+proc statusToString*(status: Status): string =
+  $cairo_status_to_string(status)
+
+proc cairo_device_reference*(device: ptr Device00): ptr Device00 {.importc, libcairo.}
+#
+proc devicReference*(device: Device): Device =
+  discard cairo_device_reference(device.impl)
+  return device
 
 type
   DeviceType* {.size: sizeof(cint), pure.} = enum
-    INVALID = - 1, DRM, GL,
-    SCRIPT, XCB, XLIB,
-    XML, COGL, WIN32
+    invalid = - 1, drm, gl,
+    script, xcb, xlib,
+    xml, cogl, win32
 
-proc getType*(device: Device): DeviceType {.
-    importc: "cairo_device_get_type", libcairo.}
+proc cairo_device_get_type*(device: ptr Device00): DeviceType {.importc, libcairo.}
+#
+proc getType*(device: Device): DeviceType =
+  cairo_device_get_type(device.impl)
 
-proc type*(device: Device): DeviceType {.
-    importc: "cairo_device_get_type", libcairo.}
-proc status*(device: Device): Status {.
-    importc: "cairo_device_status", libcairo.}
-proc acquire*(device: Device): Status {.
-    importc: "cairo_device_acquire", libcairo.}
-proc release*(device: Device) {.
-    importc: "cairo_device_release", libcairo.}
-proc flush*(device: Device) {.importc: "cairo_device_flush",
-    libcairo.}
-proc finish*(device: Device) {.importc: "cairo_device_finish",
-    libcairo.}
-proc destroy*(device: Device) {.
-    importc: "cairo_device_destroy", libcairo.}
-proc getReferenceCount*(device: Device): cuint {.
-    importc: "cairo_device_get_reference_count", libcairo.}
-proc referenceCount*(device: Device): cuint {.
-    importc: "cairo_device_get_reference_count", libcairo.}
-proc getUserData*(device: Device; key: UserDataKey): pointer {.
-    importc: "cairo_device_get_user_data", libcairo.}
-proc userData*(device: Device; key: UserDataKey): pointer {.
-    importc: "cairo_device_get_user_data", libcairo.}
-proc setUserData*(device: Device; key: UserDataKey;
-                            userData: pointer; destroy: CairoDestroyFuncT): Status {.
-    importc: "cairo_device_set_user_data", libcairo.}
+proc cairo_device_status*(device: ptr Device00): Status {.importc, libcairo.}
+#
+proc status*(device: Device): Status =
+  cairo_device_status(device.impl)
 
-proc createSimilar*(other: Surface; content: Content;
-                               width: cint; height: cint): Surface {.
-    importc: "cairo_surface_create_similar", libcairo.}
-proc createSimilarImage*(other: Surface; format: Format;
-                                    width: cint; height: cint): Surface {.
-    importc: "cairo_surface_create_similar_image", libcairo.}
-proc mapToImage*(surface: Surface;
-                            extents: RectangleInt): Surface {.
-    importc: "cairo_surface_map_to_image", libcairo.}
-proc unmapImage*(surface: Surface; image: Surface) {.
-    importc: "cairo_surface_unmap_image", libcairo.}
-proc createForRectangle*(target: Surface; x: cdouble;
-                                    y: cdouble; width: cdouble; height: cdouble): Surface {.
-    importc: "cairo_surface_create_for_rectangle", libcairo.}
+proc cairo_device_acquire*(device: ptr Device00): Status {.importc, libcairo.}
+#
+proc acquire*(device: Device): Status =
+  cairo_device_acquire(device.impl)
+
+proc cairo_device_release*(device: ptr Device00) {.importc, libcairo.}
+#
+proc release*(device: Device) =
+  cairo_device_release(device.impl)
+
+proc cairo_device_flush*(device: ptr Device00) {.importc, libcairo.}
+#
+proc flush*(device: Device) =
+  cairo_device_flush(device.impl)
+
+proc cairo_device_finish*(device: ptr Device00) {.importc, libcairo.}
+#
+proc finish*(device: Device) =
+  cairo_device_finish(device.impl)
+
+proc cairo_device_destroy*(device: ptr Device00) {.importc, libcairo.}
+#
+proc deviceDestroy*(device: Device) =
+  cairo_device_destroy(device.impl)
+
+proc cairo_device_get_reference_count*(device: ptr Device00): cuint {.importc, libcairo.}
+#
+proc getReferenceCount*(device: Device): int =
+  cairo_device_get_reference_count(device.impl).int
+
+proc cairo_device_get_user_data*(device: ptr Device00; key: ptr UserDataKey): pointer {.importc, libcairo.}
+#
+proc getUserData*(device: Device; key: ptr UserDataKey): pointer =
+  cairo_device_get_user_data(device.impl, key)
+
+proc cairo_device_set_user_data*(device: ptr Device00; key: ptr UserDataKey;
+  userData: pointer; destroy: DestroyFunc00): Status {.importc, libcairo.}
+#
+proc setUserData*(device: Device; key: ptr UserDataKey; userData: pointer; destroy: DestroyFunc00): Status =
+  cairo_device_set_user_data(device.impl, key, userData, destroy)
+
+# TODO: problem is, that it may take too long until GC may release surfaces!
+proc cairo_surface_create_similar*(other: ptr Surface00; content: Content; width, height: cint):
+  ptr Surface00 {.importc, libcairo.}
+
+proc createSimilar*(other: Surface; content: Content; width, height: int): Surface =
+  new(result, surfaceDestroy)
+  result.impl = cairo_surface_create_similar(other.impl, content, width.cint, height.cint)
+  discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_surface_create_similar_image*(other: ptr Surface00; format: Format; width, height: cint):
+  ptr Surface00 {.importc, libcairo.}
+#
+proc createSimilarImage*(other: Surface; format: Format; width, height: int): Surface =
+  new(result, surfaceDestroy)
+  result.impl = cairo_surface_create_similar_image(other.impl, format, width.cint, height.cint)
+  discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_surface_unmap_image*(surface: ptr Surface00; image: ptr Surface00) {.importc, libcairo.}
+#
+proc unmapImage*(surface: Surface; image: Surface) =
+  cairo_surface_unmap_image(surface.impl, image.impl)
+
+proc cairo_surface_map_to_image*(surface: ptr Surface00; extents: RectangleInt): ptr Surface00 {.importc, libcairo.}
+#
+proc mapToImage*(surface: Surface; extents: RectangleInt): Surface =
+  #new(result, surfaceDestroy) # no idea currently
+  new(result)
+  result.impl = cairo_surface_map_to_image(surface.impl, extents)
+
+proc cairo_surface_create_for_rectangle*(target: ptr Surface00; x, y, width, height: cdouble):
+  ptr Surface00 {.importc, libcairo.}
+#
+proc surfaceCreateForRectangle*(target: Surface; x, y, width, height: float): Surface =
+  new(result, surfaceDestroy)
+  result.impl = cairo_surface_create_for_rectangle(target.impl, x.cdouble, y.cdouble, width.cdouble, height.cdouble)
+  discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
 
 type
   SurfaceObserverMode* {.size: sizeof(cint), pure.} = enum
-    NORMAL = 0,
-    RECORD_OPERATIONS = 0x1
+    normal = 0,
+    recordOperations = 0x1
 
-proc createObserver*(target: Surface;
-                                mode: SurfaceObserverMode): Surface {.
-    importc: "cairo_surface_create_observer", libcairo.}
+proc cairo_surface_create_observer*(target: ptr Surface00;
+  mode: SurfaceObserverMode): ptr Surface00 {.importc, libcairo.}
+#
+proc createObserver*(target: Surface; mode: SurfaceObserverMode): Surface =
+  new(result, surfaceDestroy)
+  result.impl = cairo_surface_create_observer(target.impl, mode)
+  discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
 type
-  CairoSurfaceObserverCallbackT* = proc (observer: Surface;
-                                      target: Surface; data: pointer) {.cdecl.}
+  SurfaceObserverCallback00* = proc (observer: ptr Surface00;
+                                      target: ptr Surface00; data: pointer) {.cdecl.}
 
-proc observerAddPaintCallback*(abstractSurface: Surface;
-    `func`: CairoSurfaceObserverCallbackT; data: pointer): Status {.
-    importc: "cairo_surface_observer_add_paint_callback", libcairo.}
-proc observerAddMaskCallback*(abstractSurface: Surface;
-    `func`: CairoSurfaceObserverCallbackT; data: pointer): Status {.
-    importc: "cairo_surface_observer_add_mask_callback", libcairo.}
-proc observerAddFillCallback*(abstractSurface: Surface;
-    `func`: CairoSurfaceObserverCallbackT; data: pointer): Status {.
-    importc: "cairo_surface_observer_add_fill_callback", libcairo.}
-proc observerAddStrokeCallback*(abstractSurface: Surface;
-    `func`: CairoSurfaceObserverCallbackT; data: pointer): Status {.
-    importc: "cairo_surface_observer_add_stroke_callback", libcairo.}
-proc observerAddGlyphsCallback*(abstractSurface: Surface;
-    `func`: CairoSurfaceObserverCallbackT; data: pointer): Status {.
-    importc: "cairo_surface_observer_add_glyphs_callback", libcairo.}
-proc observerAddFlushCallback*(abstractSurface: Surface;
-    `func`: CairoSurfaceObserverCallbackT; data: pointer): Status {.
-    importc: "cairo_surface_observer_add_flush_callback", libcairo.}
-proc observerAddFinishCallback*(abstractSurface: Surface;
-    `func`: CairoSurfaceObserverCallbackT; data: pointer): Status {.
-    importc: "cairo_surface_observer_add_finish_callback", libcairo.}
-proc observerPrint*(surface: Surface;
-                               writeFunc: CairoWriteFuncT; closure: pointer): Status {.
-    importc: "cairo_surface_observer_print", libcairo.}
-proc observerElapsed*(surface: Surface): cdouble {.
-    importc: "cairo_surface_observer_elapsed", libcairo.}
-proc observerPrint*(device: Device; writeFunc: CairoWriteFuncT;
-                              closure: pointer): Status {.
-    importc: "cairo_device_observer_print", libcairo.}
-proc observerElapsed*(device: Device): cdouble {.
-    importc: "cairo_device_observer_elapsed", libcairo.}
-proc observerPaintElapsed*(device: Device): cdouble {.
-    importc: "cairo_device_observer_paint_elapsed", libcairo.}
-proc observerMaskElapsed*(device: Device): cdouble {.
-    importc: "cairo_device_observer_mask_elapsed", libcairo.}
-proc observerFillElapsed*(device: Device): cdouble {.
-    importc: "cairo_device_observer_fill_elapsed", libcairo.}
-proc observerStrokeElapsed*(device: Device): cdouble {.
-    importc: "cairo_device_observer_stroke_elapsed", libcairo.}
-proc observerGlyphsElapsed*(device: Device): cdouble {.
-    importc: "cairo_device_observer_glyphs_elapsed", libcairo.}
-proc reference*(surface: Surface): Surface {.
-    importc: "cairo_surface_reference", libcairo.}
-proc finish*(surface: Surface) {.
-    importc: "cairo_surface_finish", libcairo.}
-proc destroy*(surface: Surface) {.
-    importc: "cairo_surface_destroy", libcairo.}
-proc getDevice*(surface: Surface): Device {.
-    importc: "cairo_surface_get_device", libcairo.}
-proc device*(surface: Surface): Device {.
-    importc: "cairo_surface_get_device", libcairo.}
-proc getReferenceCount*(surface: Surface): cuint {.
-    importc: "cairo_surface_get_reference_count", libcairo.}
-proc referenceCount*(surface: Surface): cuint {.
-    importc: "cairo_surface_get_reference_count", libcairo.}
-proc status*(surface: Surface): Status {.
-    importc: "cairo_surface_status", libcairo.}
+# TODO: no high level procs for observers now -- we have to think about, and see if someone intents to use it
+proc cairo_surface_observer_add_paint_callback*(abstract_surface: ptr Surface00;
+  `func`: SurfaceObserverCallback00; data: pointer): Status {.importc, libcairo.}
+proc cairo_surface_observer_add_mask_callback*(abstract_surface: ptr Surface00;
+  `func`: SurfaceObserverCallback00; data: pointer): Status {.importc, libcairo.}
+proc cairo_surface_observer_add_fill_callback*(abstract_surface: ptr Surface00;
+  `func`: SurfaceObserverCallback00; data: pointer): Status {.importc, libcairo.}
+proc cairo_surface_observer_add_stroke_callback*(abstract_surface: ptr Surface00;
+  `func`: SurfaceObserverCallback00; data: pointer): Status {.importc, libcairo.}
+proc cairo_surface_observer_add_glyphs_callback*(abstract_surface: ptr Surface00;
+  `func`: SurfaceObserverCallback00; data: pointer): Status {.importc, libcairo.}
+proc cairo_surface_observer_add_flush_callback*(abstract_surface: ptr Surface00;
+  `func`: SurfaceObserverCallback00; data: pointer): Status {.importc, libcairo.}
+proc cairo_surface_observer_add_finish_callback*(abstract_surface: ptr Surface00;
+  `func`: SurfaceObserverCallback00; data: pointer): Status {.importc, libcairo.}
+proc cairo_surface_observer_print*(surface: ptr Surface00;
+  writeFunc: WriteFunc00; closure: pointer): Status {.importc, libcairo.}
+proc cairo_surface_observer_elapsed*(surface: ptr Surface00): cdouble {.importc, libcairo.}
+proc cairo_device_observer_print*(device: ptr Device00; write_func: Write_func00;
+  closure: pointer): Status {.importc, libcairo.}
+proc cairo_device_observer_elapsed*(device: ptr Device00): cdouble {.importc, libcairo.}
+proc cairo_device_observer_paint_elapsed*(device: ptr Device00): cdouble {.importc, libcairo.}
+proc cairo_device_observer_mask_elapsed*(device: ptr Device00): cdouble {.importc, libcairo.}
+proc cairo_device_observer_fill_elapsed*(device: ptr Device00): cdouble {.importc, libcairo.}
+proc cairo_device_observer_stroke_elapsed*(device: ptr Device00): cdouble {.importc, libcairo.}
+proc cairo_device_observer_glyphs_elapsed*(device: ptr Device00): cdouble {.importc, libcairo.}
+
+proc cairo_surface_finish*(surface: ptr Surface00) {.importc, libcairo.}
+#
+proc finish*(surface: Surface) =
+  cairo_surface_finish(surface.impl)
+
+proc cairo_surface_get_device*(surface: ptr Surface00): ptr Device00 {.importc, libcairo.}
+#
+proc getDevice*(surface: Surface): Device =
+  let h = cairo_surface_get_device(surface.impl)
+  if h.isNil: return nil
+  let d = cairo_device_get_user_data(h, NUDK)
+  if d.isNil:
+    assert false # may this happen?
+    new(result, deviceDestroy)
+    result.impl = h
+    discard cairo_device_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+    discard cairo_device_reference(result.impl)
+  else:
+    result = cast[Device](d)
+    assert(result.impl == h)
+    #discard cairo_device_reference(result.impl) # should be not necessary?
+
+proc cairo_surface_status*(surface: ptr Surface00): Status {.importc, libcairo.}
+#
+proc status*(surface: Surface): Status =
+  cairo_surface_status(surface.impl)
+#
+#const getStatus* = status
 
 type
   SurfaceType* {.size: sizeof(cint), pure.} = enum
-    IMAGE, PDF, PS,
-    XLIB, XCB, GLITZ,
-    QUARTZ, WIN32, BEOS,
-    DIRECTFB, SVG, OS2,
-    WIN32_PRINTING, QUARTZ_IMAGE,
-    SCRIPT, QT,
-    RECORDING, VG, GL,
-    DRM, TEE, XML,
-    SKIA, SUBSURFACE,
-    COGL
+    image, pdf, ps,
+    xlib, xcb, glitz,
+    quartz, win32, beos,
+    directfb, svg, os2,
+    win32_printing, quartz_image,
+    script, qt,
+    recording, vg, gl,
+    drm, tee, xml,
+    skia, subsurface,
+    cogl
 
-proc getType*(surface: Surface): SurfaceType {.
-    importc: "cairo_surface_get_type", libcairo.}
+proc cairo_surface_get_type*(surface: ptr Surface00): SurfaceType {.importc, libcairo.}
+#
+proc getType*(surface: Surface): SurfaceType =
+  cairo_surface_get_type(surface.impl)
 
-proc type*(surface: Surface): SurfaceType {.
-    importc: "cairo_surface_get_type", libcairo.}
-proc getContent*(surface: Surface): Content {.
-    importc: "cairo_surface_get_content", libcairo.}
-proc content*(surface: Surface): Content {.
-    importc: "cairo_surface_get_content", libcairo.}
+proc cairo_surface_get_content*(surface: ptr Surface00): Content {.importc, libcairo.}
+#
+proc getContent*(surface: Surface): Content =
+  cairo_surface_get_content(surface.impl)
+#
+#const content* = getContent
+
 when CAIRO_HAS_PNG_FUNCTIONS:
-  proc writeToPng*(surface: Surface; filename: cstring): Status {.
-      importc: "cairo_surface_write_to_png", libcairo.}
-  proc writeToPngStream*(surface: Surface;
-                                    writeFunc: CairoWriteFuncT; closure: pointer): Status {.
-      importc: "cairo_surface_write_to_png_stream", libcairo.}
-proc getUserData*(surface: Surface; key: UserDataKey): pointer {.
-    importc: "cairo_surface_get_user_data", libcairo.}
-proc userData*(surface: Surface; key: UserDataKey): pointer {.
-    importc: "cairo_surface_get_user_data", libcairo.}
-proc setUserData*(surface: Surface;
-                             key: UserDataKey; userData: pointer;
-                             destroy: CairoDestroyFuncT): Status {.
-    importc: "cairo_surface_set_user_data", libcairo.}
+  proc cairo_surface_write_to_png*(surface: ptr Surface00; filename: cstring): Status {.importc, libcairo.}
+#
+  proc writeToPng*(surface: Surface; filename: string): Status =
+    cairo_surface_write_to_png(surface.impl, filename)
+
+  proc cairo_surface_write_to_png_stream*(surface: ptr Surface00;
+    writeFunc: WriteFunc00; closure: pointer): Status {.importc, libcairo.}
+#
+  proc writeToPngStream*(surface: Surface; writeFunc: WriteFunc00; closure: pointer): Status =
+    cairo_surface_write_to_png_stream(surface.impl, writeFunc, closure)
+
 const
   MIME_TYPE_JPEG* = "image/jpeg"
   MIME_TYPE_PNG* = "image/png"
@@ -966,574 +1738,1048 @@ const
   MIME_TYPE_JBIG2_GLOBAL* = "application/x-cairo.jbig2-global"
   MIME_TYPE_JBIG2_GLOBAL_ID* = "application/x-cairo.jbig2-global-id"
 
-proc getMimeData*(surface: Surface; mimeType: cstring;
-                             data: ptr ptr cuchar; length: var culong) {.
-    importc: "cairo_surface_get_mime_data", libcairo.}
-proc setMimeData*(surface: Surface; mimeType: cstring;
-                             data: ptr cuchar; length: culong;
-                             destroy: CairoDestroyFuncT; closure: pointer): Status {.
-    importc: "cairo_surface_set_mime_data", libcairo.}
-proc supportsMimeType*(surface: Surface; mimeType: cstring): CairoBoolT {.
-    importc: "cairo_surface_supports_mime_type", libcairo.}
-proc getFontOptions*(surface: Surface;
-                                options: var FontOptionsObj) {.
-    importc: "cairo_surface_get_font_options", libcairo.}
-proc flush*(surface: Surface) {.
-    importc: "cairo_surface_flush", libcairo.}
-proc markDirty*(surface: Surface) {.
-    importc: "cairo_surface_mark_dirty", libcairo.}
-proc markDirtyRectangle*(surface: Surface; x: cint; y: cint;
-                                    width: cint; height: cint) {.
-    importc: "cairo_surface_mark_dirty_rectangle", libcairo.}
-proc setDeviceScale*(surface: Surface; xScale: cdouble;
-                                yScale: cdouble) {.
-    importc: "cairo_surface_set_device_scale", libcairo.}
-proc `deviceScale=`*(surface: Surface; xScale: cdouble;
-                                yScale: cdouble) {.
-    importc: "cairo_surface_set_device_scale", libcairo.}
-proc getDeviceScale*(surface: Surface; xScale: var cdouble;
-                                yScale: var cdouble) {.
-    importc: "cairo_surface_get_device_scale", libcairo.}
-proc setDeviceOffset*(surface: Surface; xOffset: cdouble;
-                                 yOffset: cdouble) {.
-    importc: "cairo_surface_set_device_offset", libcairo.}
-proc `deviceOffset=`*(surface: Surface; xOffset: cdouble;
-                                 yOffset: cdouble) {.
-    importc: "cairo_surface_set_device_offset", libcairo.}
-proc getDeviceOffset*(surface: Surface; xOffset: var cdouble;
-                                 yOffset: var cdouble) {.
-    importc: "cairo_surface_get_device_offset", libcairo.}
-proc setFallbackResolution*(surface: Surface;
-                                       xPixelsPerInch: cdouble;
-                                       yPixelsPerInch: cdouble) {.
-    importc: "cairo_surface_set_fallback_resolution", libcairo.}
-proc `fallbackResolution=`*(surface: Surface;
-                                       xPixelsPerInch: cdouble;
-                                       yPixelsPerInch: cdouble) {.
-    importc: "cairo_surface_set_fallback_resolution", libcairo.}
-proc getFallbackResolution*(surface: Surface;
-                                       xPixelsPerInch: var cdouble;
-                                       yPixelsPerInch: var cdouble) {.
-    importc: "cairo_surface_get_fallback_resolution", libcairo.}
-proc copyPage*(surface: Surface) {.
-    importc: "cairo_surface_copy_page", libcairo.}
-proc showPage*(surface: Surface) {.
-    importc: "cairo_surface_show_page", libcairo.}
-proc hasShowTextGlyphs*(surface: Surface): CairoBoolT {.
-    importc: "cairo_surface_has_show_text_glyphs", libcairo.}
+proc cairo_surface_get_mime_data*(surface: ptr Surface00; mime_type: cstring;
+  data: var ptr cuchar; length: var culong) {.importc, libcairo.}
+#
+proc getMimeData*(surface: Surface; mimeType: string; data: var seq[int8]) =
+  var p: ptr cuchar
+  var l: culong
+  cairo_surface_get_mime_data(surface.impl, mimeType, p, l)
+  data = newSeq[int8](l.int)
+  copyMem(addr data[0], p, l.int)
+  #for i in 0 .. data.high:
+  #  data[i] = cast[ptr array[99, int8]](p)[i] # wrong
 
-proc imageSurfaceCreate*(format: Format; width: cint; height: cint): Surface {.
-    importc: "cairo_image_surface_create", libcairo.}
-proc strideForWidth*(format: Format; width: cint): cint {.
-    importc: "cairo_format_stride_for_width", libcairo.}
-proc imageSurfaceCreateForData*(data: ptr cuchar; format: Format;
-                                    width: cint; height: cint; stride: cint): Surface {.
-    importc: "cairo_image_surface_create_for_data", libcairo.}
-proc imageSurfaceGetData*(surface: Surface): ptr cuchar {.
-    importc: "cairo_image_surface_get_data", libcairo.}
-proc imageSurfaceGetFormat*(surface: Surface): Format {.
-    importc: "cairo_image_surface_get_format", libcairo.}
-proc imageSurfaceGetWidth*(surface: Surface): cint {.
-    importc: "cairo_image_surface_get_width", libcairo.}
-proc imageSurfaceGetHeight*(surface: Surface): cint {.
-    importc: "cairo_image_surface_get_height", libcairo.}
-proc imageSurfaceGetStride*(surface: Surface): cint {.
-    importc: "cairo_image_surface_get_stride", libcairo.}
+proc cairo_surface_set_mime_data*(surface: ptr Surface00; mime_type: cstring;
+  data: ptr cuchar; length: culong; destroy: DestroyFunc00; closure: pointer): Status {.importc, libcairo.}
+#
+proc setMimeData*(surface: Surface; mimeType: string; data: openArray[int8]; destroy: DestroyFunc00; closure: pointer): Status =
+  cairo_surface_set_mime_data(surface.impl, mimeType, cast[ptr cuchar](unsafeaddr data[0]), data.len.culong, destroy, closure)
+
+proc cairo_surface_supports_mime_type*(surface: ptr Surface00; mime_type: cstring): Bool00 {.importc, libcairo.}
+#
+proc supportsMimeType*(surface: Surface; mimeType: string): bool =
+  cairo_surface_supports_mime_type(surface.impl, mimeType).bool
+
+proc cairo_surface_get_font_options*(surface: ptr Surface00; options: ptr FontOptions00) {.importc, libcairo.}
+
+proc getFontOptions*(surface: Surface; options: var FontOptions) =
+  new(options, fontOptionsDestroy)
+  options.impl = cairo_font_options_create()
+  cairo_surface_get_font_options(surface.impl, options.impl)
+
+proc cairo_surface_flush*(surface: ptr Surface00) {.importc, libcairo.}
+#
+proc flush*(surface: Surface) =
+  cairo_surface_flush(surface.impl)
+
+proc cairo_surface_mark_dirty*(surface: ptr Surface00) {.importc, libcairo.}
+#
+proc markDirty*(surface: Surface) =
+  cairo_surface_mark_dirty(surface.impl)
+
+proc cairo_surface_mark_dirty_rectangle*(surface: ptr Surface00; x, y, width, height: cint) {.importc, libcairo.}
+#
+proc markDirtyRectangle*(surface: Surface; x, y, width, height: int) =
+  cairo_surface_mark_dirty_rectangle(surface.impl, x.cint, y.cint, width.cint, height.cint)
+
+proc cairo_surface_set_device_scale*(surface: ptr Surface00; xScale, yScale: cdouble) {.importc, libcairo.}
+#
+proc setDeviceScale*(surface: Surface; xScale, yScale: float) =
+  cairo_surface_set_device_scale(surface.impl, xScale.cdouble, yScale.cdouble)
+
+proc cairo_surface_get_device_scale*(surface: ptr Surface00; xScale, yScale: var cdouble) {.importc, libcairo.}
+#
+proc getDeviceScale*(surface: Surface; xScale, yScale: var float) =
+  var x, y: cdouble
+  cairo_surface_get_device_scale(surface.impl, x, y)
+  xScale = x.float
+  yScale = y.float
+
+proc cairo_surface_set_device_offset*(surface: ptr Surface00; xOffset, yOffset: cdouble) {.importc, libcairo.}
+#
+proc setDeviceOffset*(surface: Surface; xOffset, yOffset: float) =
+  cairo_surface_set_device_offset(surface.impl, xOffset.cdouble, yOffset.cdouble)
+
+proc cairo_surface_get_device_offset*(surface: ptr Surface00; xOffset, yOffset: var cdouble) {.importc, libcairo.}
+#
+proc getDeviceOffset*(surface: Surface; xOffset, yOffset: var float) =
+  var x, y: cdouble
+  cairo_surface_get_device_offset(surface.impl, x, y)
+  xOffset = x.float
+  yOffset = y.float
+
+proc cairo_surface_set_fallback_resolution*(surface: ptr Surface00; xPixelsPerInch, yPixelsPerInch: cdouble) {.importc, libcairo.}
+#
+proc setFallbackResolution*(surface: Surface; xPixelsPerInch, yPixelsPerInch: float) =
+  cairo_surface_set_fallback_resolution(surface.impl, xPixelsPerInch.cdouble, yPixelsPerInch.cdouble)
+
+proc cairo_surface_get_fallback_resolution*(surface: ptr Surface00; xPixelsPerInch, yPixelsPerInch: var cdouble) {.
+  importc, libcairo.}
+#
+proc getFallbackResolution*(surface: Surface; xPixelsPerInch, yPixelsPerInch: var float) =
+  var x, y: cdouble
+  cairo_surface_get_fallback_resolution(surface.impl, x, y)
+  xPixelsPerInch = x.float
+  yPixelsPerInch = y.float
+
+proc cairo_surface_copy_page*(surface: ptr Surface00) {.importc, libcairo.}
+#
+proc copyPage*(surface: Surface) =
+  cairo_surface_copy_page(surface.impl)
+
+proc cairo_surface_show_page*(surface: ptr Surface00) {.importc, libcairo.}
+#
+proc showPage*(surface: Surface) =
+  cairo_surface_show_page(surface.impl)
+
+proc cairo_surface_has_show_text_glyphs*(surface: ptr Surface00): Bool00 {.importc, libcairo.}
+#
+proc hasShowTextGlyphs*(surface: Surface): bool =
+  cairo_surface_has_show_text_glyphs(surface.impl).bool
+
+proc cairo_image_surface_create*(format: Format; width, height: cint): ptr Surface00 {.importc, libcairo.}
+#
+proc imageSurfaceCreate*(format: Format; width, height: int): Surface =
+  new(result, surfaceDestroy)
+  result.impl = cairo_image_surface_create(format, width.cint, height.cint)
+  discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_format_stride_for_width*(format: Format; width: cint): cint {.importc, libcairo.}
+#
+proc strideForWidth*(format: Format; width: int): int =
+  cairo_format_stride_for_width(format, width.cint).int
+
+# TODO: no high level support for now
+proc cairo_image_surface_create_for_data*(data: ptr cuchar; format: Format; width, height, stride: cint):
+  ptr Surface00 {.importc, libcairo.}
+
+proc cairo_image_surface_get_data*(surface: ptr Surface00): ptr cuchar {.importc, libcairo.}
+
+proc cairo_image_surface_get_format*(surface: ptr Surface00): Format {.importc, libcairo.}
+#
+proc imageSurfaceGetFormat*(surface: Surface): Format =
+  cairo_image_surface_get_format(surface.impl)
+
+proc cairo_image_surface_get_width*(surface: ptr Surface00): cint {.importc, libcairo.}
+#
+proc imageSurfaceGetWidth*(surface: Surface): int =
+  cairo_image_surface_get_width(surface.impl).int
+
+proc cairo_image_surface_get_height*(surface: ptr Surface00): cint {.importc, libcairo.}
+#
+proc imageSurfaceGetHeight*(surface: Surface): int =
+  cairo_image_surface_get_height(surface.impl).int
+
+proc cairo_image_surface_get_stride*(surface: ptr Surface00): cint {.importc, libcairo.}
+#
+proc imageSurfaceGetStride*(surface: Surface): int =
+  cairo_image_surface_get_stride(surface.impl).int
+
 when CAIRO_HAS_PNG_FUNCTIONS:
-  proc imageSurfaceCreateFromPng*(filename: cstring): Surface {.
-      importc: "cairo_image_surface_create_from_png", libcairo.}
-  proc imageSurfaceCreateFromPngStream*(readFunc: CairoReadFuncT;
-      closure: pointer): Surface {.
-      importc: "cairo_image_surface_create_from_png_stream", libcairo.}
+  proc cairo_image_surface_create_from_png*(filename: cstring): ptr Surface00 {.importc, libcairo.}
 
-proc recordingSurfaceCreate*(content: Content;
-                                 extents: Rectangle): Surface {.
-    importc: "cairo_recording_surface_create", libcairo.}
-proc recordingSurfaceInkExtents*(surface: Surface; x0: var cdouble;
-                                     y0: var cdouble; width: var cdouble;
-                                     height: var cdouble) {.
-    importc: "cairo_recording_surface_ink_extents", libcairo.}
-proc recordingSurfaceGetExtents*(surface: Surface;
-                                     extents: Rectangle): CairoBoolT {.
-    importc: "cairo_recording_surface_get_extents", libcairo.}
+  proc imageSurfaceCreateFromPng*(filename: string): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_image_surface_create_from_png(filename)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_image_surface_create_from_png_stream*(read_func: Read_func00;
+    closure: pointer): ptr Surface00 {.importc, libcairo.}
+#
+  proc imageSurfaceCreateFromPngStream*(readFunc: ReadFunc00; closure: pointer): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_image_surface_create_from_png_stream(readFunc, closure)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_recording_surface_create*(content: Content; extents: Rectangle00): ptr Surface00 {.importc, libcairo.}
+#
+proc recordingSurfaceCreate*(content: Content; extents: Rectangle00): Surface =
+  new(result, surfaceDestroy)
+  result.impl = cairo_recording_surface_create(content, extents)
+  discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_recording_surface_ink_extents*(surface: ptr Surface00; x0, y0, width, height: var cdouble) {.importc, libcairo.}
+#
+proc recordingSurfaceInkExtents*(surface: Surface; x0, y0, width, height: var float) =
+  var x00, y00, width0, height0: cdouble
+  cairo_recording_surface_ink_extents(surface.impl, x00, y00, width0, height0)
+  x0 = x00.float
+  y0 = y00.float
+  width = width0.float
+  height = height0.float
+
+proc cairo_recording_surface_get_extents*(surface: ptr Surface00; extents: Rectangle00): Bool00 {.importc, libcairo.}
+#
+proc recordingSurfaceGetExtents*(surface: Surface; extents: Rectangle00): bool =
+  cairo_recording_surface_get_extents(surface.impl, extents).bool
 
 type
-  CairoRasterSourceAcquireFuncT* = proc (pattern: Pattern;
+  RasterSourceAcquireFunc00* = proc (pattern: ptr Pattern00;
                                       callbackData: pointer;
-                                      target: Surface;
-                                      extents: RectangleInt): Surface {.cdecl.}
+                                      target: ptr Surface00;
+                                      extents: ptr RectangleInt): ptr Surface00 {.cdecl.}
 
 type
-  CairoRasterSourceReleaseFuncT* = proc (pattern: Pattern;
+  RasterSourceReleaseFunc00* = proc (pattern: ptr Pattern00;
                                       callbackData: pointer;
-                                      surface: Surface) {.cdecl.}
+                                      surface: ptr Surface00) {.cdecl.}
 
 type
-  CairoRasterSourceSnapshotFuncT* = proc (pattern: Pattern;
+  RasterSourceSnapshotFunc00* = proc (pattern: ptr Pattern00;
                                        callbackData: pointer): Status {.cdecl.}
 
 type
-  CairoRasterSourceCopyFuncT* = proc (pattern: Pattern;
-                                   callbackData: pointer; other: Pattern): Status {.cdecl.}
+  RasterSourceCopyFunc00* = proc (pattern: ptr Pattern00;
+                                   callbackData: pointer; other: ptr Pattern00): Status {.cdecl.}
 
 type
-  CairoRasterSourceFinishFuncT* = proc (pattern: Pattern;
+  RasterSourceFinishFunc00* = proc (pattern: ptr Pattern00;
                                      callbackData: pointer) {.cdecl.}
 
-proc patternCreateRasterSource*(userData: pointer; content: Content;
-                                    width: cint; height: cint): Pattern {.
-    importc: "cairo_pattern_create_raster_source", libcairo.}
-proc rasterSourcePatternSetCallbackData*(pattern: Pattern;
-    data: pointer) {.importc: "cairo_raster_source_pattern_set_callback_data",
-                   libcairo.}
-proc rasterSourcePatternGetCallbackData*(pattern: Pattern): pointer {.
-    importc: "cairo_raster_source_pattern_get_callback_data", libcairo.}
-proc rasterSourcePatternSetAcquire*(pattern: Pattern;
-                                        acquire: CairoRasterSourceAcquireFuncT;
-                                        release: CairoRasterSourceReleaseFuncT) {.
-    importc: "cairo_raster_source_pattern_set_acquire", libcairo.}
-proc rasterSourcePatternGetAcquire*(pattern: Pattern; acquire: ptr CairoRasterSourceAcquireFuncT;
-    release: ptr CairoRasterSourceReleaseFuncT) {.
-    importc: "cairo_raster_source_pattern_get_acquire", libcairo.}
-proc rasterSourcePatternSetSnapshot*(pattern: Pattern;
-    snapshot: CairoRasterSourceSnapshotFuncT) {.
-    importc: "cairo_raster_source_pattern_set_snapshot", libcairo.}
-proc rasterSourcePatternGetSnapshot*(pattern: Pattern): CairoRasterSourceSnapshotFuncT {.
-    importc: "cairo_raster_source_pattern_get_snapshot", libcairo.}
-proc rasterSourcePatternSetCopy*(pattern: Pattern;
-                                     copy: CairoRasterSourceCopyFuncT) {.
-    importc: "cairo_raster_source_pattern_set_copy", libcairo.}
-proc rasterSourcePatternGetCopy*(pattern: Pattern): CairoRasterSourceCopyFuncT {.
-    importc: "cairo_raster_source_pattern_get_copy", libcairo.}
-proc rasterSourcePatternSetFinish*(pattern: Pattern;
-                                       finish: CairoRasterSourceFinishFuncT) {.
-    importc: "cairo_raster_source_pattern_set_finish", libcairo.}
-proc rasterSourcePatternGetFinish*(pattern: Pattern): CairoRasterSourceFinishFuncT {.
-    importc: "cairo_raster_source_pattern_get_finish", libcairo.}
+proc cairo_pattern_create_raster_source*(userData: pointer; content: Content; width, height: cint):
+  ptr Pattern00 {.importc, libcairo.}
+#
+proc patternCreateRasterSource*(userData: pointer; content: Content; width, height: int): Pattern =
+  new(result, patternDestroy)
+  result.impl = cairo_pattern_create_raster_source(userData, content, width.cint, height.cint)
+  discard cairo_pattern_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
 
-proc patternCreateRgb*(red: cdouble; green: cdouble; blue: cdouble): Pattern {.
-    importc: "cairo_pattern_create_rgb", libcairo.}
-proc patternCreateRgba*(red: cdouble; green: cdouble; blue: cdouble;
-                            alpha: cdouble): Pattern {.
-    importc: "cairo_pattern_create_rgba", libcairo.}
-proc patternCreateForSurface*(surface: Surface): Pattern {.
-    importc: "cairo_pattern_create_for_surface", libcairo.}
-proc patternCreateLinear*(x0: cdouble; y0: cdouble; x1: cdouble; y1: cdouble): Pattern {.
-    importc: "cairo_pattern_create_linear", libcairo.}
-proc patternCreateRadial*(cx0: cdouble; cy0: cdouble; radius0: cdouble;
-                              cx1: cdouble; cy1: cdouble; radius1: cdouble): Pattern {.
-    importc: "cairo_pattern_create_radial", libcairo.}
-proc patternCreateMesh*(): Pattern {.
-    importc: "cairo_pattern_create_mesh", libcairo.}
-proc reference*(pattern: Pattern): Pattern {.
-    importc: "cairo_pattern_reference", libcairo.}
-proc destroy*(pattern: Pattern) {.
-    importc: "cairo_pattern_destroy", libcairo.}
-proc getReferenceCount*(pattern: Pattern): cuint {.
-    importc: "cairo_pattern_get_reference_count", libcairo.}
-proc referenceCount*(pattern: Pattern): cuint {.
-    importc: "cairo_pattern_get_reference_count", libcairo.}
-proc status*(pattern: Pattern): Status {.
-    importc: "cairo_pattern_status", libcairo.}
-proc getUserData*(pattern: Pattern; key: UserDataKey): pointer {.
-    importc: "cairo_pattern_get_user_data", libcairo.}
-proc userData*(pattern: Pattern; key: UserDataKey): pointer {.
-    importc: "cairo_pattern_get_user_data", libcairo.}
-proc setUserData*(pattern: Pattern;
-                             key: UserDataKey; userData: pointer;
-                             destroy: CairoDestroyFuncT): Status {.
-    importc: "cairo_pattern_set_user_data", libcairo.}
+proc cairo_raster_source_pattern_set_callback_data*(pattern: ptr Pattern00; data: pointer) {.importc,libcairo.}
+#
+proc rasterSourcePatternSetCallbackData*(pattern: Pattern; data: pointer) =
+  cairo_raster_source_pattern_set_callback_data(pattern.impl, data)
+
+proc cairo_raster_source_pattern_get_callback_data*(pattern: ptr Pattern00): pointer {.importc, libcairo.}
+#
+proc rasterSourcePatternGetCallbackData*(pattern: Pattern): pointer =
+  cairo_raster_source_pattern_get_callback_data(pattern.impl)
+
+proc cairo_raster_source_pattern_set_acquire*(pattern: ptr Pattern00;
+  acquire: RasterSourceAcquireFunc00; release: RasterSourceReleaseFunc00) {.importc, libcairo.}
+#
+proc rasterSourcePatternSetAcquire*(pattern: Pattern; acquire: RasterSourceAcquireFunc00; release: RasterSourceReleaseFunc00) =
+  cairo_raster_source_pattern_set_acquire(pattern.impl, acquire, release)
+
+proc cairo_raster_source_pattern_get_acquire*(pattern: ptr Pattern00; acquire: ptr Raster_source_acquire_func00;
+    release: ptr RasterSourceReleaseFunc00) {.importc, libcairo.}
+#
+proc rasterSourcePatternGetAcquire*(pattern: Pattern; acquire: ptr Raster_source_acquire_func00; release: ptr RasterSourceReleaseFunc00) =
+  cairo_raster_source_pattern_get_acquire(pattern.impl, acquire, release)
+
+proc cairo_raster_source_pattern_set_snapshot*(pattern: ptr Pattern00; snapshot: RasterSourceSnapshotFunc00) {.importc, libcairo.}
+#
+proc rasterSourcePatternSetSnapshot*(pattern: Pattern; snapshot: RasterSourceSnapshotFunc00) =
+  cairo_raster_source_pattern_set_snapshot(pattern.impl, snapshot)
+
+proc cairo_raster_source_pattern_get_snapshot*(pattern: ptr Pattern00): Raster_source_snapshot_func00 {.importc, libcairo.}
+#
+proc rasterSourcePatternGetSnapshot*(pattern: Pattern): RasterSourceSnapshotFunc00 =
+  cairo_raster_source_pattern_get_snapshot(pattern.impl)
+
+proc cairo_raster_source_pattern_set_copy*(pattern: ptr Pattern00; copy: RasterSourceCopyFunc00) {.importc, libcairo.}
+#
+proc rasterSourcePatternSetCopy*(pattern: Pattern; copy: RasterSourceCopyFunc00) =
+  cairo_raster_source_pattern_set_copy(pattern.impl, copy)
+
+proc cairo_raster_source_pattern_get_copy*(pattern: ptr Pattern00): Raster_source_copy_func00 {.importc, libcairo.}
+#
+proc rasterSourcePatternGetCopy*(pattern: Pattern): RasterSourceCopyFunc00 =
+  cairo_raster_source_pattern_get_copy(pattern.impl)
+
+proc cairo_raster_source_pattern_set_finish*(pattern: ptr Pattern00; finish: RasterSourceFinishFunc00) {.importc, libcairo.}
+#
+proc raster_source_pattern_set_finish*(pattern: Pattern; finish: RasterSourceFinishFunc00) =
+  cairo_raster_source_pattern_set_finish(pattern.impl, finish)
+
+proc cairo_raster_source_pattern_get_finish*(pattern: ptr Pattern00): RasterSourceFinishFunc00 {.importc, libcairo.}
+#
+proc rasterSourcePatternGetFinish*(pattern: Pattern): RasterSourceFinishFunc00 =
+  cairo_raster_source_pattern_get_finish(pattern.impl)
+
+proc cairo_pattern_create_rgb*(red, green, blue: cdouble): ptr Pattern00 {.importc, libcairo.}
+#
+proc patternCreateRgb*(red, green, blue: float): Pattern =
+  new(result, patternDestroy)
+  result.impl = cairo_pattern_create_rgb(red.cdouble, green.cdouble, blue.cdouble)
+  discard cairo_pattern_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_pattern_create_rgba*(red, green, blue, alpha: cdouble): ptr Pattern00 {.importc, libcairo.}
+#
+proc patternCreateRgba*(red, green, blue, alpha: float): Pattern =
+  new(result, patternDestroy)
+  result.impl = cairo_pattern_create_rgba(red.cdouble, green.cdouble, blue.cdouble, alpha.cdouble)
+  discard cairo_pattern_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_pattern_create_for_surface*(surface: ptr Surface00): ptr Pattern00 {.importc, libcairo.}
+#
+proc patternCreateForSurface*(surface: Surface): Pattern =
+  new(result, patternDestroy)
+  result.impl = cairo_pattern_create_for_surface(surface.impl)
+  discard cairo_pattern_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_pattern_create_linear*(x0, y0, x1, y1: cdouble): ptr Pattern00 {.importc, libcairo.}
+#
+proc patternCreateLinear*(x0, y0, x1, y1: float): Pattern =
+  new(result, patternDestroy)
+  result.impl = cairo_pattern_create_linear(x0.cdouble, y0.cdouble, x1.cdouble, y1.cdouble)
+  discard cairo_pattern_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_pattern_create_radial*(cx0, cy0, radius0, cx1, cy1, radius1: cdouble): ptr Pattern00 {.importc, libcairo.}
+#
+proc patternCreateRadial*(cx0, cy0, radius0, cx1, cy1, radius1: float): Pattern =
+  new(result, patternDestroy)
+  result.impl = cairo_pattern_create_radial(cx0.cdouble, cy0.cdouble, radius0.cdouble, cx1.cdouble, cy1.cdouble, radius1.cdouble)
+  discard cairo_pattern_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_pattern_create_mesh*(): ptr Pattern00 {.importc, libcairo.}
+#
+proc patternCreateMesh*(): Pattern =
+  new(result, patternDestroy)
+  result.impl = cairo_pattern_create_mesh()
+  discard cairo_pattern_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_pattern_reference*(pattern: ptr Pattern00): ptr Pattern00 {.importc, libcairo.}
+#
+proc patternReference*(pattern: Pattern): Pattern =
+  discard cairo_pattern_reference(pattern.impl)
+  return pattern
+
+proc cairo_pattern_status*(pattern: ptr Pattern00): Status {.importc, libcairo.}
+#
+proc status*(pattern: Pattern): Status =
+  cairo_pattern_status(pattern.impl)
 
 type
   PatternType* {.size: sizeof(cint), pure.} = enum
-    SOLID, SURFACE,
-    LINEAR, RADIAL, MESH,
-    RASTER_SOURCE
+    solid, surface,
+    linear, radial, mesh,
+    raster_source
 
-proc getType*(pattern: Pattern): PatternType {.
-    importc: "cairo_pattern_get_type", libcairo.}
+proc cairo_pattern_get_type*(pattern: ptr Pattern00): PatternType {.importc, libcairo.}
+#
+proc getType*(pattern: Pattern): PatternType =
+  cairo_pattern_get_type(pattern.impl)
 
-proc type*(pattern: Pattern): PatternType {.
-    importc: "cairo_pattern_get_type", libcairo.}
-proc addColorStopRgb*(pattern: Pattern; offset: cdouble;
-                                 red: cdouble; green: cdouble; blue: cdouble) {.
-    importc: "cairo_pattern_add_color_stop_rgb", libcairo.}
-proc addColorStopRgba*(pattern: Pattern; offset: cdouble;
-                                  red: cdouble; green: cdouble; blue: cdouble;
-                                  alpha: cdouble) {.
-    importc: "cairo_pattern_add_color_stop_rgba", libcairo.}
-proc meshPatternBeginPatch*(pattern: Pattern) {.
-    importc: "cairo_mesh_pattern_begin_patch", libcairo.}
-proc meshPatternEndPatch*(pattern: Pattern) {.
-    importc: "cairo_mesh_pattern_end_patch", libcairo.}
-proc meshPatternCurveTo*(pattern: Pattern; x1: cdouble; y1: cdouble;
-                             x2: cdouble; y2: cdouble; x3: cdouble; y3: cdouble) {.
-    importc: "cairo_mesh_pattern_curve_to", libcairo.}
-proc meshPatternLineTo*(pattern: Pattern; x: cdouble; y: cdouble) {.
-    importc: "cairo_mesh_pattern_line_to", libcairo.}
-proc meshPatternMoveTo*(pattern: Pattern; x: cdouble; y: cdouble) {.
-    importc: "cairo_mesh_pattern_move_to", libcairo.}
-proc meshPatternSetControlPoint*(pattern: Pattern; pointNum: cuint;
-                                     x: cdouble; y: cdouble) {.
-    importc: "cairo_mesh_pattern_set_control_point", libcairo.}
-proc meshPatternSetCornerColorRgb*(pattern: Pattern;
-                                       cornerNum: cuint; red: cdouble;
-                                       green: cdouble; blue: cdouble) {.
-    importc: "cairo_mesh_pattern_set_corner_color_rgb", libcairo.}
-proc meshPatternSetCornerColorRgba*(pattern: Pattern;
-                                        cornerNum: cuint; red: cdouble;
-                                        green: cdouble; blue: cdouble;
-                                        alpha: cdouble) {.
-    importc: "cairo_mesh_pattern_set_corner_color_rgba", libcairo.}
-proc setMatrix*(pattern: Pattern; matrix: ptr Matrix) {.
-    importc: "cairo_pattern_set_matrix", libcairo.}
-proc `matrix=`*(pattern: Pattern; matrix: Matrix) {.
-    importc: "cairo_pattern_set_matrix", libcairo.}
-proc getMatrix*(pattern: Pattern; matrix: var MatrixObj) {.
-    importc: "cairo_pattern_get_matrix", libcairo.}
+proc cairo_pattern_add_color_stop_rgb*(pattern: ptr Pattern00; offset, red, green, blue: cdouble) {.importc, libcairo.}
+#
+proc addColorStopRgb*(pattern: Pattern; offset, red, green, blue: float) =
+  cairo_pattern_add_color_stop_rgb(pattern.impl, offset.cdouble, red.cdouble, green.cdouble, blue.cdouble)
+
+proc cairo_pattern_add_color_stop_rgba*(pattern: ptr Pattern00; offset, red, green, blue, alpha: cdouble) {.importc, libcairo.}
+#
+proc addColorStopRgba*(pattern: Pattern; offset, red, green, blue, alpha: float) =
+  cairo_pattern_add_color_stop_rgba(pattern.impl, offset.cdouble, red.cdouble, green.cdouble, blue.cdouble, alpha.cdouble)
+
+proc cairo_mesh_pattern_begin_patch*(pattern: ptr Pattern00) {.importc, libcairo.}
+#
+proc meshPatternBeginPatch*(pattern: Pattern) =
+  cairo_mesh_pattern_begin_patch(pattern.impl)
+
+proc cairo_mesh_pattern_end_patch*(pattern: ptr Pattern00) {.importc, libcairo.}
+#
+proc meshPatternEndPatch*(pattern: Pattern) =
+  cairo_mesh_pattern_end_patch(pattern.impl)
+
+proc cairo_mesh_pattern_curve_to*(pattern: ptr Pattern00; x1, y1, x2, y2, x3, y3: cdouble) {.importc, libcairo.}
+#
+proc meshPatternCurveTo*(pattern: Pattern; x1, y1, x2, y2, x3, y3: float) =
+  cairo_mesh_pattern_curve_to(pattern.impl, x1.cdouble, y1.cdouble, x2.cdouble, y2.cdouble, x3.cdouble, y3.cdouble)
+
+proc cairo_mesh_pattern_line_to*(pattern: ptr Pattern00; x, y: cdouble) {.importc, libcairo.}
+#
+proc meshPatternLineTo*(pattern: Pattern; x, y: float) =
+  cairo_mesh_pattern_line_to(pattern.impl, x.cdouble, y.cdouble)
+
+proc cairo_mesh_pattern_move_to*(pattern: ptr Pattern00; x, y: cdouble) {.importc, libcairo.}
+#
+proc meshPatternMoveTo*(pattern: Pattern; x, y: float) =
+  cairo_mesh_pattern_move_to(pattern.impl, x.cdouble, y.cdouble)
+
+proc cairo_mesh_pattern_set_control_point*(pattern: ptr Pattern00; pointNum: cuint; x, y: cdouble) {.importc, libcairo.}
+#
+proc meshPatternSetControlPoint*(pattern: Pattern; pointNum: int; x, y: float) =
+  cairo_mesh_pattern_set_control_point(pattern.impl, pointNum.cuint, x.cdouble, y.cdouble)
+
+proc cairo_mesh_pattern_set_corner_color_rgb*(pattern: ptr Pattern00; cornerNum: cuint; red, green, blue: cdouble) {.
+  importc, libcairo.}
+#
+proc meshPatternSetCornerColorRgb*(pattern: Pattern; cornerNum: int; red, green, blue: float) =
+  cairo_mesh_pattern_set_corner_color_rgb(pattern.impl, cornerNum.cuint, red.cdouble, green.cdouble, blue.cdouble)
+
+proc cairo_mesh_pattern_set_corner_color_rgba*(pattern: ptr Pattern00; cornerNum: cuint; red, green, blue, alpha: cdouble) {.
+  importc, libcairo.}
+#
+proc mesh_pattern_set_corner_color_rgba*(pattern: Pattern; cornerNum: int; red, green, blue, alpha: float) =
+  cairo_mesh_pattern_set_corner_color_rgba(pattern.impl, cornerNum.cuint, red.cdouble, green.cdouble, blue.cdouble, alpha.cdouble)
+
+proc cairo_pattern_set_matrix*(pattern: ptr Pattern00; matrix: Matrix) {.importc, libcairo.}
+#
+proc setMatrix*(pattern: Pattern; matrix: Matrix) =
+  cairo_pattern_set_matrix(pattern.impl, matrix)
+
+proc cairo_pattern_get_matrix*(pattern: ptr Pattern00; matrix: var Matrix) {.importc, libcairo.}
+#
+proc patternGetMatrix*(pattern: Pattern; matrix: var Matrix) =
+  cairo_pattern_get_matrix(pattern.impl, matrix)
 
 type
   Extend* {.size: sizeof(cint), pure.} = enum
-    NONE, REPEAT, REFLECT, PAD
+    none, repeat, reflect, pad
 
-proc setExtend*(pattern: Pattern; extend: Extend) {.
-    importc: "cairo_pattern_set_extend", libcairo.}
+proc cairo_pattern_set_extend*(pattern: ptr Pattern00; extend: Extend) {.importc, libcairo.}
+#
+proc setExtend*(pattern: Pattern; extend: Extend) =
+  cairo_pattern_set_extend(pattern.impl, extend)
+#
+#const `extend=`* = setExtend
 
-proc `extend=`*(pattern: Pattern; extend: Extend) {.
-    importc: "cairo_pattern_set_extend", libcairo.}
-proc getExtend*(pattern: Pattern): Extend {.
-    importc: "cairo_pattern_get_extend", libcairo.}
-proc extend*(pattern: Pattern): Extend {.
-    importc: "cairo_pattern_get_extend", libcairo.}
+proc cairo_pattern_get_extend*(pattern: ptr Pattern00): Extend {.importc, libcairo.}
+#
+proc getExtend*(pattern: Pattern): Extend =
+  cairo_pattern_get_extend(pattern.impl)
 
 type
   Filter* {.size: sizeof(cint), pure.} = enum
-    FAST, GOOD, BEST, NEAREST,
-    BILINEAR, GAUSSIAN
+    fast, good, best, nearest,
+    bilinear, gaussian
 
-proc setFilter*(pattern: Pattern; filter: Filter) {.
-    importc: "cairo_pattern_set_filter", libcairo.}
+proc cairo_pattern_set_filter*(pattern: ptr Pattern00; filter: Filter) {.importc, libcairo.}
+#
+proc setFilter*(pattern: Pattern; filter: Filter) =
+  cairo_pattern_set_filter(pattern.impl, filter)
+#
+#const `filter=`* = setFilter
 
-proc `filter=`*(pattern: Pattern; filter: Filter) {.
-    importc: "cairo_pattern_set_filter", libcairo.}
-proc getFilter*(pattern: Pattern): Filter {.
-    importc: "cairo_pattern_get_filter", libcairo.}
-proc filter*(pattern: Pattern): Filter {.
-    importc: "cairo_pattern_get_filter", libcairo.}
-proc getRgba*(pattern: Pattern; red: var cdouble;
-                         green: var cdouble; blue: var cdouble; alpha: var cdouble): Status {.
-    importc: "cairo_pattern_get_rgba", libcairo.}
-proc rgba*(pattern: Pattern; red: var cdouble;
-                         green: var cdouble; blue: var cdouble; alpha: var cdouble): Status {.
-    importc: "cairo_pattern_get_rgba", libcairo.}
-proc getSurface*(pattern: Pattern;
-                            surface: var Surface): Status {.
-    importc: "cairo_pattern_get_surface", libcairo.}
-proc surface*(pattern: Pattern;
-                            surface: var Surface): Status {.
-    importc: "cairo_pattern_get_surface", libcairo.}
-proc getColorStopRgba*(pattern: Pattern; index: cint;
-                                  offset: var cdouble; red: var cdouble;
-                                  green: var cdouble; blue: var cdouble;
-                                  alpha: var cdouble): Status {.
-    importc: "cairo_pattern_get_color_stop_rgba", libcairo.}
-proc colorStopRgba*(pattern: Pattern; index: cint;
-                                  offset: var cdouble; red: var cdouble;
-                                  green: var cdouble; blue: var cdouble;
-                                  alpha: var cdouble): Status {.
-    importc: "cairo_pattern_get_color_stop_rgba", libcairo.}
-proc getColorStopCount*(pattern: Pattern; count: var cint): Status {.
-    importc: "cairo_pattern_get_color_stop_count", libcairo.}
-proc colorStopCount*(pattern: Pattern; count: var cint): Status {.
-    importc: "cairo_pattern_get_color_stop_count", libcairo.}
-proc getLinearPoints*(pattern: Pattern; x0: var cdouble;
-                                 y0: var cdouble; x1: var cdouble; y1: var cdouble): Status {.
-    importc: "cairo_pattern_get_linear_points", libcairo.}
-proc linearPoints*(pattern: Pattern; x0: var cdouble;
-                                 y0: var cdouble; x1: var cdouble; y1: var cdouble): Status {.
-    importc: "cairo_pattern_get_linear_points", libcairo.}
-proc getRadialCircles*(pattern: Pattern; x0: var cdouble;
-                                  y0: var cdouble; r0: var cdouble; x1: var cdouble;
-                                  y1: var cdouble; r1: var cdouble): Status {.
-    importc: "cairo_pattern_get_radial_circles", libcairo.}
-proc radialCircles*(pattern: Pattern; x0: var cdouble;
-                                  y0: var cdouble; r0: var cdouble; x1: var cdouble;
-                                  y1: var cdouble; r1: var cdouble): Status {.
-    importc: "cairo_pattern_get_radial_circles", libcairo.}
-proc meshPatternGetPatchCount*(pattern: Pattern; count: var cuint): Status {.
-    importc: "cairo_mesh_pattern_get_patch_count", libcairo.}
-proc meshPatternGetPath*(pattern: Pattern; patchNum: cuint): Path {.
-    importc: "cairo_mesh_pattern_get_path", libcairo.}
-proc meshPatternGetCornerColorRgba*(pattern: Pattern;
-                                        patchNum: cuint; cornerNum: cuint;
-                                        red: var cdouble; green: var cdouble;
-                                        blue: var cdouble; alpha: var cdouble): Status {.
-    importc: "cairo_mesh_pattern_get_corner_color_rgba", libcairo.}
-proc meshPatternGetControlPoint*(pattern: Pattern; patchNum: cuint;
-                                     pointNum: cuint; x: var cdouble; y: var cdouble): Status {.
-    importc: "cairo_mesh_pattern_get_control_point", libcairo.}
+proc cairo_pattern_get_filter*(pattern: ptr Pattern00): Filter {.importc, libcairo.}
+#
+proc getFilter*(pattern: Pattern): Filter =
+  cairo_pattern_get_filter(pattern.impl)
 
-proc init*(matrix: ptr Matrix; xx: cdouble; yx: cdouble; xy: cdouble;
-                     yy: cdouble; x0: cdouble; y0: cdouble) {.
-    importc: "cairo_matrix_init", libcairo.}
-proc initIdentity*(matrix: ptr Matrix) {.
-    importc: "cairo_matrix_init_identity", libcairo.}
-proc initTranslate*(matrix: ptr Matrix; tx: cdouble; ty: cdouble) {.
-    importc: "cairo_matrix_init_translate", libcairo.}
-proc initScale*(matrix: ptr Matrix; sx: cdouble; sy: cdouble) {.
-    importc: "cairo_matrix_init_scale", libcairo.}
-proc initRotate*(matrix: ptr Matrix; radians: cdouble) {.
-    importc: "cairo_matrix_init_rotate", libcairo.}
-proc translate*(matrix: ptr Matrix; tx: cdouble; ty: cdouble) {.
-    importc: "cairo_matrix_translate", libcairo.}
-proc scale*(matrix: ptr Matrix; sx: cdouble; sy: cdouble) {.
-    importc: "cairo_matrix_scale", libcairo.}
-proc rotate*(matrix: ptr Matrix; radians: cdouble) {.
-    importc: "cairo_matrix_rotate", libcairo.}
-proc invert*(matrix: ptr Matrix): Status {.
-    importc: "cairo_matrix_invert", libcairo.}
-proc multiply*(result: ptr Matrix; a: ptr Matrix;
-                         b: ptr Matrix) {.importc: "cairo_matrix_multiply",
-    libcairo.}
-proc transformDistance*(matrix: Matrix; dx: var cdouble;
-                                  dy: var cdouble) {.
-    importc: "cairo_matrix_transform_distance", libcairo.}
-proc transformPoint*(matrix: Matrix; x: var cdouble;
-                               y: var cdouble) {.
-    importc: "cairo_matrix_transform_point", libcairo.}
+proc cairo_pattern_get_rgba*(pattern: ptr Pattern00; red, green, blue, alpha: var cdouble): Status {.importc, libcairo.}
+#
+proc getRgba*(pattern: Pattern; red, green, blue, alpha: var float): Status =
+  var red0, green0, blue0, alpha0: cdouble
+  result = cairo_pattern_get_rgba(pattern.impl, red0, green0, blue0, alpha0)
+  red = red0.float
+  green = green0.float
+  blue = blue0.float
+  alpha = alpha0.float
 
-type
-  Region* =  ptr RegionObj
-  RegionPtr* = ptr RegionObj
-  RegionObj* = object
+proc cairo_pattern_get_surface*(pattern: ptr Pattern00; surface: var ptr Surface00): Status {.importc, libcairo.}
+#
+proc getSurface*(pattern: Pattern; surface: var Surface): Status =
+  var h: ptr Surface00
+  let s = cairo_pattern_get_surface(pattern.impl, h)
+  if s != Status.success: return s
+  let d = cairo_surface_get_user_data(h, NUDK)
+  if d.isNil:
+    assert false # may this happen?
+    new(surface, surfaceDestroy)
+    surface.impl = h
+    discard cairo_surface_set_user_data(surface.impl, NUDK, cast[pointer](surface), gcuref)
+    discard cairo_surface_reference(surface.impl)
+  else:
+    surface = cast[Surface](d)
+    assert(surface.impl == h)
+    #discard cairo_surface_reference(result.impl) # should be not necessary?
+
+proc cairo_pattern_get_color_stop_rgba*(pattern: ptr Pattern00; index: cint; offset, red, green, blue, alpha: var cdouble):
+  Status {.importc, libcairo.}
+#
+proc getColorStopRgba*(pattern: Pattern; index: int; offset, red, green, blue, alpha: var float): Status =
+  var offset0, red0, green0, blue0, alpha0: cdouble
+  result = cairo_pattern_get_color_stop_rgba(pattern.impl, index.cint, offset0, red0, green0, blue0, alpha0)
+  offset = offset0
+  red = red0
+  green = green0
+  blue = blue0
+  alpha = alpha0
+
+proc cairo_pattern_get_color_stop_count*(pattern: ptr Pattern00; count: var cint): Status {.importc, libcairo.}
+#
+proc getColorStopCount*(pattern: Pattern; count: var int): Status =
+  var c: cint
+  result = cairo_pattern_get_color_stop_count(pattern.impl, c)
+  count = c.int
+
+proc cairo_pattern_get_linear_points*(pattern: ptr Pattern00; x0, y0, x1, y1: var cdouble): Status {.importc, libcairo.}
+#
+proc getLinearPoints*(pattern: Pattern; x0, y0, x1, y1: var float): Status =
+  var x00, y00, x10, y10: cdouble
+  result = cairo_pattern_get_linear_points(pattern.impl, x00, y00, x10, y10)
+  x0 = x00
+  y0 = y00
+  x1 = x10
+  y1 = y10
+
+proc cairo_pattern_get_radial_circles*(pattern: ptr Pattern00; x0, y0, r0, x1, y1, r1: var cdouble): Status {.importc, libcairo.}
+#
+proc getRadialCircles*(pattern: Pattern; x0, y0, r0, x1, y1, r1: var float): Status =
+  var x00, y00, r00, x10, y10, r10: cdouble
+  result = cairo_pattern_get_radial_circles(pattern.impl, x00, y00, r00, x10, y10, r10)
+  x0 = x00
+  y0 = y00
+  x1 = x10
+  y1 = y10
+  r0 = r00
+  r1 = r10
+
+proc cairo_mesh_pattern_get_patch_count*(pattern: ptr Pattern00; count: var cuint): Status {.importc, libcairo.}
+#
+proc meshPatternGetPatchCount*(pattern: Pattern; count: var int): Status =
+  var c: cuint
+  result = cairo_mesh_pattern_get_patch_count(pattern.impl, c)
+  count = c.int
+
+proc cairo_mesh_pattern_get_path*(pattern: ptr Pattern00; patchNum: cuint): ptr Path00 {.importc, libcairo.}
+#
+proc meshPatternGetPath*(pattern: Pattern; patchNum: int): Path =
+  new(result, pathDestroy)
+  result.impl = cairo_mesh_pattern_get_path(pattern.impl, patchNum.cuint)
+
+proc cairo_mesh_pattern_get_corner_color_rgba*(pattern: ptr Pattern00; patchNum, cornerNum: cuint;
+  red, green, blue, alpha: var cdouble): Status {.importc, libcairo.}
+#
+proc meshPatternGetCornerColorRgba*(pattern: Pattern; patchNum, cornerNum: int; red, green, blue, alpha: var float): Status =
+  cairo_mesh_pattern_get_corner_color_rgba(pattern.impl, patchNum.cuint, cornerNum.cuint, red.cdouble, green.cdouble, blue.cdouble, alpha.cdouble)
+
+proc cairo_mesh_pattern_get_control_point*(pattern: ptr Pattern00; patchNum, pointNum: cuint; x, y: var cdouble):
+  Status {.importc, libcairo.}
+#
+proc meshPatternGetControlPoint*(pattern: Pattern; patchNum, pointNum: int; x, y: var float): Status =
+  var x0, y0: cdouble
+  result = cairo_mesh_pattern_get_control_point(pattern.impl, patchNum.cuint, pointNum.cuint, x0, y0)
+  x = x0
+  y = y0
+
+proc cairo_matrix_init*(matrix: var Matrix; xx, yx, xy, yy, x0, y0: cdouble) {.importc, libcairo.}
+#
+proc matrixInit*(matrix: var Matrix; xx, yx, xy, yy, x0, y0: float) =
+  cairo_matrix_init(matrix, xx.cdouble, yx.cdouble, xy.cdouble, yy.cdouble, x0.cdouble, y0.cdouble)
+
+proc cairo_matrix_init_identity*(matrix: var Matrix) {.importc, libcairo.}
+#
+const initIdentity* = cairo_matrix_init_identity
+
+proc cairo_matrix_init_translate*(matrix: var Matrix; tx, ty: cdouble) {.importc, libcairo.}
+#
+proc initTranslate*(matrix: var Matrix; tx, ty: float) =
+  cairo_matrix_init_translate(matrix, tx.cdouble, ty.cdouble)
+
+proc cairo_matrix_init_scale*(matrix: var Matrix; sx, sy: cdouble) {.importc, libcairo.}
+#
+proc initScale*(matrix: var Matrix; sx, sy: float) =
+  cairo_matrix_init_scale(matrix, sx.cdouble, sy.cdouble)
+
+proc cairo_matrix_init_rotate*(matrix: var Matrix; radians: cdouble) {.importc, libcairo.}
+#
+proc initRotate*(matrix: var Matrix; radians: float) =
+  cairo_matrix_init_rotate(matrix, radians.cdouble)
+
+proc cairo_matrix_translate*(matrix: var Matrix; tx, ty: cdouble) {.importc, libcairo.}
+#
+proc translate*(matrix: var Matrix; tx, ty: float) =
+  cairo_matrix_translate(matrix, tx.cdouble, ty.cdouble)
+
+proc cairo_matrix_scale*(matrix: var Matrix; sx, sy: cdouble) {.importc, libcairo.}
+#
+proc scale*(matrix: var Matrix; sx, sy: float) =
+  cairo_matrix_scale(matrix, sx.cdouble, sy.cdouble)
+
+proc cairo_matrix_rotate*(matrix: var Matrix; radians: cdouble) {.importc, libcairo.}
+#
+proc rotate*(matrix: var Matrix; radians: float) =
+  cairo_matrix_rotate(matrix, radians.cdouble)
+
+proc cairo_matrix_invert*(matrix: var Matrix): Status {.importc, libcairo.}
+#
+const invert* = cairo_matrix_invert
+#proc invert*(matrix: var Matrix): Status =
+#  cairo_matrix_invert(matrix)
+
+proc cairo_matrix_multiply*(result: var Matrix; a: Matrix; b: Matrix) {.importc, libcairo.}
+#
+const multiply* = cairo_matrix_multiply
+
+proc cairo_matrix_transform_distance*(matrix: var Matrix; dx, dy: var cdouble) {.importc, libcairo.}
+#
+proc transformDistance*(matrix: var Matrix; dx, dy: var float) =
+  var x, y: cdouble
+  cairo_matrix_transform_distance(matrix, x, y)
+  dx = x
+  dy = y
+
+proc cairo_matrix_transform_point*(matrix: var Matrix; x, y: var cdouble) {.importc, libcairo.}
+#
+proc transformPoint*(matrix: var Matrix; x, y: var float) =
+  var x0, y0: cdouble
+  cairo_matrix_transform_point(matrix, x0, y0)
+  x = x0
+  y = y0
 
 type
   RegionOverlap* {.size: sizeof(cint), pure.} = enum
-    `IN`, `OUT`, PART
+    `in`, `out`, part
 
-proc regionCreate*(): Region {.importc: "cairo_region_create",
-    libcairo.}
-proc regionCreateRectangle*(rectangle: RectangleInt): Region {.
-    importc: "cairo_region_create_rectangle", libcairo.}
-proc regionCreateRectangles*(rects: RectangleInt; count: cint): Region {.
-    importc: "cairo_region_create_rectangles", libcairo.}
-proc copy*(original: Region): Region {.
-    importc: "cairo_region_copy", libcairo.}
-proc reference*(region: Region): Region {.
-    importc: "cairo_region_reference", libcairo.}
-proc destroy*(region: Region) {.
-    importc: "cairo_region_destroy", libcairo.}
-proc equal*(a: Region; b: Region): CairoBoolT {.
-    importc: "cairo_region_equal", libcairo.}
-proc status*(region: Region): Status {.
-    importc: "cairo_region_status", libcairo.}
-proc getExtents*(region: Region;
-                           extents: var RectangleIntObj) {.
-    importc: "cairo_region_get_extents", libcairo.}
-proc numRectangles*(region: Region): cint {.
-    importc: "cairo_region_num_rectangles", libcairo.}
-proc getRectangle*(region: Region; nth: cint;
-                             rectangle: var RectangleIntObj) {.
-    importc: "cairo_region_get_rectangle", libcairo.}
-proc isEmpty*(region: Region): CairoBoolT {.
-    importc: "cairo_region_is_empty", libcairo.}
-proc containsRectangle*(region: Region;
-                                  rectangle: RectangleInt): RegionOverlap {.
-    importc: "cairo_region_contains_rectangle", libcairo.}
-proc containsPoint*(region: Region; x: cint; y: cint): CairoBoolT {.
-    importc: "cairo_region_contains_point", libcairo.}
-proc translate*(region: Region; dx: cint; dy: cint) {.
-    importc: "cairo_region_translate", libcairo.}
-proc subtract*(dst: Region; other: Region): Status {.
-    importc: "cairo_region_subtract", libcairo.}
-proc subtractRectangle*(dst: Region;
-                                  rectangle: RectangleInt): Status {.
-    importc: "cairo_region_subtract_rectangle", libcairo.}
-proc intersect*(dst: Region; other: Region): Status {.
-    importc: "cairo_region_intersect", libcairo.}
-proc intersectRectangle*(dst: Region;
-                                   rectangle: RectangleInt): Status {.
-    importc: "cairo_region_intersect_rectangle", libcairo.}
-proc union*(dst: Region; other: Region): Status {.
-    importc: "cairo_region_union", libcairo.}
-proc unionRectangle*(dst: Region;
-                               rectangle: RectangleInt): Status {.
-    importc: "cairo_region_union_rectangle", libcairo.}
-proc xor_op*(dst: Region; other: Region): Status {.
-    importc: "cairo_region_xor", libcairo.}
-proc xorRectangle*(dst: Region;
-                             rectangle: RectangleInt): Status {.
-    importc: "cairo_region_xor_rectangle", libcairo.}
+proc cairo_region_destroy*(region: ptr Region00) {.importc, libcairo.}
+#
+proc regionDestroy*(region: Region) =
+  cairo_region_destroy(region.impl)
 
-proc debugResetStaticData*() {.importc: "cairo_debug_reset_static_data",
-                                  libcairo.}
+# there is no cairo_region_set_user_data()
+proc cairo_region_create*(): ptr Region00 {.importc, libcairo.}
+#
+proc regionCreate*(): Region =
+  new(result, regionDestroy)
+  result.impl = cairo_region_create()
+  #discard cairo_region_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+proc cairo_region_create_rectangle*(rectangle: RectangleInt): ptr Region00 {.importc, libcairo.}
+#
+proc regionCreateRectangle*(rectangle: RectangleInt): Region =
+  new(result, regionDestroy)
+  result.impl = cairo_region_create_rectangle(rectangle)
+
+# TODO
+proc cairo_region_create_rectangles*(rects: RectangleInt; count: cint): ptr Region00 {.importc, libcairo.}
+#
+
+proc cairo_region_copy*(original: ptr Region00): ptr Region00 {.importc, libcairo.}
+#
+proc regionCopy*(original: Region): Region =
+  new(result, regionDestroy)
+  result.impl = cairo_region_copy(original.impl)
+
+proc cairo_region_reference*(region: ptr Region00): ptr Region00 {.importc, libcairo.}
+#
+proc regionReference*(region: Region): Region =
+  discard cairo_region_reference(region.impl)
+  return region
+
+proc cairo_region_equal*(a: ptr Region00; b: ptr Region00): Bool00 {.importc, libcairo.}
+#
+proc equal*(a: Region; b: Region): bool =
+  cairo_region_equal(a.impl, b.impl).bool
+
+proc cairo_region_status*(region: ptr Region00): Status {.importc, libcairo.}
+#
+proc status*(region: Region): Status =
+  cairo_region_status(region.impl)
+
+proc cairo_region_get_extents*(region: ptr Region00; extents: var RectangleInt) {.importc, libcairo.}
+#
+proc getExtents*(region: Region; extents: var RectangleInt) =
+  cairo_region_get_extents(region.impl, extents)
+
+proc cairo_region_num_rectangles*(region: ptr Region00): cint {.importc, libcairo.}
+#
+proc numRectangles*(region: Region): int =
+  cairo_region_num_rectangles(region.impl).int
+
+proc cairo_region_get_rectangle*(region: ptr Region00; nth: cint; rectangle: var RectangleInt) {.importc, libcairo.}
+#
+proc getRectangle*(region: Region; nth: int; rectangle: var RectangleInt) =
+  cairo_region_get_rectangle(region.impl, nth.cint, rectangle)
+
+proc cairo_region_is_empty*(region: ptr Region00): Bool00 {.importc, libcairo.}
+#
+proc isEmpty*(region: Region): bool =
+  cairo_region_is_empty(region.impl).bool
+
+proc cairo_region_contains_rectangle*(region: ptr Region00;
+  rectangle: RectangleInt): RegionOverlap {.importc, libcairo.}
+#
+proc containsRectangle*(region: Region; rectangle: RectangleInt): RegionOverlap =
+  cairo_region_contains_rectangle(region.impl, rectangle)
+
+proc cairo_region_contains_point*(region: ptr Region00; x, y: cint): Bool00 {.importc, libcairo.}
+#
+proc containsPoint*(region: Region; x, y: int): bool =
+  cairo_region_contains_point(region.impl, x.cint, y.cint).bool
+
+proc cairo_region_translate*(region: ptr Region00; dx, dy: cint) {.importc, libcairo.}
+#
+proc translate*(region: Region; dx, dy: int) =
+  cairo_region_translate(region.impl, dx.cint, dy.cint)
+
+proc cairo_region_subtract*(dst: ptr Region00; other: ptr Region00): Status {.importc, libcairo.}
+#
+proc subtract*(dst: Region; other: Region): Status =
+  cairo_region_subtract(dst.impl, other.impl)
+
+proc cairo_region_subtract_rectangle*(dst: ptr Region00;
+  rectangle: RectangleInt): Status {.importc, libcairo.}
+#
+proc subtractRectangle*(dst: Region; rectangle: RectangleInt): Status =
+  cairo_region_subtract_rectangle(dst.impl, rectangle)
+
+proc cairo_region_intersect*(dst: ptr Region00; other: ptr Region00): Status {.importc, libcairo.}
+#
+proc intersect*(dst: Region; other: Region): Status =
+  cairo_region_intersect(dst.impl, other.impl)
+
+proc cairo_region_intersect_rectangle*(dst: ptr Region00;
+  rectangle: RectangleInt): Status {.importc, libcairo.}
+#
+proc intersectRectangle*(dst: Region; rectangle: RectangleInt): Status =
+  cairo_region_intersect_rectangle(dst.impl, rectangle)
+
+proc cairo_region_union*(dst: ptr Region00; other: ptr Region00): Status {.importc, libcairo.}
+#
+proc union*(dst: Region; other: Region): Status =
+  cairo_region_union(dst.impl, other.impl)
+
+proc cairo_region_union_rectangle*(dst: ptr Region00;
+  rectangle: RectangleInt): Status {.importc, libcairo.}
+#
+proc unionRectangle*(dst: Region; rectangle: RectangleInt): Status =
+  cairo_region_union_rectangle(dst.impl, rectangle)
+
+proc cairo_region_xor*(dst: ptr Region00; other: ptr Region00): Status {.importc, libcairo.}
+#
+proc regionXor*(dst: Region; other: Region): Status =
+  cairo_region_xor(dst.impl, other.impl)
+
+proc cairo_region_xor_rectangle*(dst: ptr Region00; rectangle: RectangleInt): Status {.importc, libcairo.}
+#
+proc xorRectangle*(dst: Region; rectangle: RectangleInt): Status =
+  cairo_region_xor_rectangle(dst.impl, rectangle)
+
+proc cairo_debug_reset_static_data*() {.importc, libcairo.}
 
 when CAIRO_HAS_PDF_SURFACE:
   type
     PdfVersion* {.size: sizeof(cint), pure.} = enum
-      V1_4, V1_5
-  proc pdfSurfaceCreate*(filename: cstring; widthInPoints: cdouble;
-                             heightInPoints: cdouble): Surface {.
-      importc: "cairo_pdf_surface_create", libcairo.}
-  proc pdfSurfaceCreateForStream*(writeFunc: CairoWriteFuncT;
-                                      closure: pointer; widthInPoints: cdouble;
-                                      heightInPoints: cdouble): Surface {.
-      importc: "cairo_pdf_surface_create_for_stream", libcairo.}
-  proc pdfSurfaceRestrictToVersion*(surface: Surface;
-                                        version: PdfVersion) {.
-      importc: "cairo_pdf_surface_restrict_to_version", libcairo.}
-  proc pdfGetVersions*(versions: ptr ptr PdfVersion; numVersions: var cint) {.
-      importc: "cairo_pdf_get_versions", libcairo.}
-  proc toString*(version: PdfVersion): cstring {.
-      importc: "cairo_pdf_version_to_string", libcairo.}
-  proc pdfSurfaceSetSize*(surface: Surface; widthInPoints: cdouble;
-                              heightInPoints: cdouble) {.
-      importc: "cairo_pdf_surface_set_size", libcairo.}
+      v1_4, v1_5
+  proc cairo_pdf_surface_create*(filename: cstring; widthInPoints, heightInPoints: cdouble): ptr Surface00 {.
+    importc, libcairo.}
+#pong
+  proc pdfSurfaceCreate*(filename: string; widthInPoints, heightInPoints: float): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_pdf_surface_create(filename, widthInPoints.cdouble, heightInPoints.cdouble)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_pdf_surface_create_for_stream*(writeFunc: WriteFunc00;
+    closure: pointer; widthInPoints, heightInPoints: cdouble): ptr Surface00 {.importc, libcairo.}
+#
+  proc pdfSurfaceCreateForStream*(writeFunc: WriteFunc00; closure: pointer; widthInPoints, heightInPoints: float): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_pdf_surface_create_for_stream(writeFunc, closure, widthInPoints.cdouble, heightInPoints.cdouble)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_pdf_surface_restrict_to_version*(surface: ptr Surface00;
+    version: PdfVersion) {.importc, libcairo.}
+#
+  proc pdfSurfaceRestrictToVersion*(surface: Surface; version: PdfVersion) =
+    cairo_pdf_surface_restrict_to_version(surface.impl, version)
+
+#TODO
+  proc cairo_pdf_get_versions*(versions: ptr ptr PdfVersion; numVersions: var cint) {.importc, libcairo.}
+#
+  #proc pdfGetVersions*(versions: ptr ptr Pdf_version; num_versions: var cint)
+  #proc cairo_pdf_get_versions*(versions: ptr ptr Pdf_version; num_versions: var cint)
+
+  proc cairo_pdf_version_to_string*(version: PdfVersion): cstring {.importc, libcairo.}
+#
+  proc `$`*(version: PdfVersion): string =
+    $cairo_pdf_version_to_string(version)
+
+  proc cairo_pdf_surface_set_size*(surface: ptr Surface00; widthInPoints, heightInPoints: cdouble) {.
+    importc, libcairo.}
+#
+  proc setSize*(surface: Surface; widthInPoints, heightInPoints: float) =
+    cairo_pdf_surface_set_size(surface.impl, widthInPoints.cdouble, heightInPoints.cdouble)
+
+  type
+    PdfOutlineFlags* {.size: sizeof(cint), pure.} = enum
+      open = 0x1,
+      bold = 0x2,
+      italic = 0x4
+  const
+    CAIRO_PDF_OUTLINE_ROOT* = 0
+
+  proc cairo_pdf_surface_add_outline*(surface: ptr Surface00; parentId: cint;
+    utf8: cstring; dest: cstring; flags: PdfOutlineFlags): cint {.importc, libcairo.}
+#
+  proc pdfSurfaceAddOutline*(surface: Surface; parentId: int; utf8: string; dest: string; flags: PdfOutlineFlags): int =
+    cairo_pdf_surface_add_outline(surface.impl, parentId.cint, utf8, dest, flags).int
+
+  type
+    PdfMetadata* {.size: sizeof(cint), pure.} = enum
+      title, author,
+      subject, keywords,
+      creator, create_date,
+      mod_date
+
+  proc cairo_pdf_surface_set_metadata*(surface: ptr Surface00;
+    metadata: PdfMetadata; utf8: cstring) {.importc, libcairo.}
+#
+  proc pdfSurfaceSetMetadata*(surface: Surface; metadata: PdfMetadata; utf8: string) =
+    cairo_pdf_surface_set_metadata(surface.impl, metadata, utf8)
+
+  proc cairo_pdf_surface_set_page_label*(surface: ptr Surface00; utf8: cstring) {.importc, libcairo.}
+#
+  proc pdfSurfaceSetPageLabel*(surface: Surface; utf8: string) =
+    cairo_pdf_surface_set_page_label(surface.impl, utf8)
+
+  proc cairo_pdf_surface_set_thumbnail_size*(surface: ptr Surface00; width, height: cint) {.importc, libcairo.}
+#
+  proc pdfSurfaceSetThumbnailSize*(surface: Surface; width, height: int) =
+    cairo_pdf_surface_set_thumbnail_size(surface.impl, width.cint, height.cint)
 
 when CAIRO_HAS_PS_SURFACE:
   type
     PS_Level* {.size: sizeof(cint), pure.} = enum
-      L2, L3
-  proc psSurfaceCreate*(filename: cstring; widthInPoints: cdouble;
-                            heightInPoints: cdouble): Surface {.
-      importc: "cairo_ps_surface_create", libcairo.}
-  proc psSurfaceCreateForStream*(writeFunc: CairoWriteFuncT; closure: pointer;
-                                     widthInPoints: cdouble;
-                                     heightInPoints: cdouble): Surface {.
-      importc: "cairo_ps_surface_create_for_stream", libcairo.}
-  proc psSurfaceRestrictToLevel*(surface: Surface;
-                                     level: PsLevel) {.
-      importc: "cairo_ps_surface_restrict_to_level", libcairo.}
-  proc psGetLevels*(levels: ptr ptr PsLevel; numLevels: var cint) {.
-      importc: "cairo_ps_get_levels", libcairo.}
-  proc toString*(level: PsLevel): cstring {.
-      importc: "cairo_ps_level_to_string", libcairo.}
-  proc psSurfaceSetEps*(surface: Surface; eps: CairoBoolT) {.
-      importc: "cairo_ps_surface_set_eps", libcairo.}
-  proc psSurfaceGetEps*(surface: Surface): CairoBoolT {.
-      importc: "cairo_ps_surface_get_eps", libcairo.}
-  proc psSurfaceSetSize*(surface: Surface; widthInPoints: cdouble;
-                             heightInPoints: cdouble) {.
-      importc: "cairo_ps_surface_set_size", libcairo.}
-  proc psSurfaceDscComment*(surface: Surface; comment: cstring) {.
-      importc: "cairo_ps_surface_dsc_comment", libcairo.}
-  proc psSurfaceDscBeginSetup*(surface: Surface) {.
-      importc: "cairo_ps_surface_dsc_begin_setup", libcairo.}
-  proc psSurfaceDscBeginPageSetup*(surface: Surface) {.
-      importc: "cairo_ps_surface_dsc_begin_page_setup", libcairo.}
+      l2, l3
+
+  proc cairo_ps_surface_create*(filename: cstring; widthInPoints, heightInPoints: cdouble): ptr Surface00 {.
+    importc, libcairo.}
+#
+  proc psSurfaceCreate*(filename: string; widthInPoints, heightInPoints: float): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_ps_surface_create(filename, widthInPoints.cdouble, heightInPoints.cdouble)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_ps_surface_create_for_stream*(writeFunc: WriteFunc00; closure: pointer;
+    widthInPoints, heightInPoints: cdouble): ptr Surface00 {.importc, libcairo.}
+#
+  proc psSurfaceCreateForStream*(writeFunc: WriteFunc00; closure: pointer; widthInPoints, heightInPoints: float): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_ps_surface_create_for_stream(writeFunc, closure, widthInPoints.cdouble, heightInPoints.cdouble)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_ps_surface_restrict_to_level*(surface: ptr Surface00; level: PsLevel) {.importc, libcairo.}
+#
+  proc psSurfaceRestrictToLevel*(surface: Surface; level: PsLevel) =
+    cairo_ps_surface_restrict_to_level(surface.impl, level)
+
+#TODO
+  proc cairo_ps_get_levels*(levels: ptr ptr PsLevel; numLevels: var cint) {.importc, libcairo.}
+#
+  #proc cairo_ps_get_levels*(levels: ptr ptr Ps_level; num_levels: var cint)
+  #proc cairo_ps_get_levels*(levels: ptr ptr Ps_level; num_levels: var cint)
+
+  proc cairo_ps_level_to_string*(level: PsLevel): cstring {.importc, libcairo.}
+#
+  proc `$`*(level: Ps_level): string =
+    $cairo_ps_level_to_string(level)
+
+  proc cairo_ps_surface_set_eps*(surface: ptr Surface00; eps: Bool00) {.importc, libcairo.}
+#
+  proc psSurfaceSetEps*(surface: Surface; eps = true) =
+    cairo_ps_surface_set_eps(surface.impl, eps.Bool00)
+
+  proc cairo_ps_surface_get_eps*(surface: ptr Surface00): Bool00 {.importc, libcairo.}
+#
+  proc psSurfaceGetEps*(surface: Surface): bool =
+    cairo_ps_surface_get_eps(surface.impl).bool
+
+  proc cairo_ps_surface_set_size*(surface: ptr Surface00; widthInPoints, heightInPoints: cdouble) {.importc, libcairo.}
+#
+  proc psSurfaceSetSize*(surface: Surface; widthInPoints, heightInPoints: float) =
+    cairo_ps_surface_set_size(surface.impl, widthInPoints.cdouble, heightInPoints.cdouble)
+
+  proc cairo_ps_surface_dsc_comment*(surface: ptr Surface00; comment: cstring) {.importc, libcairo.}
+#
+  proc psSurfaceDscComment*(surface: Surface; comment: string) =
+    cairo_ps_surface_dsc_comment(surface.impl, comment)
+
+  proc cairo_ps_surface_dsc_begin_setup*(surface: ptr Surface00) {.importc, libcairo.}
+#
+  proc psSurfaceDscBeginSetup*(surface: Surface) =
+    cairo_ps_surface_dsc_begin_setup(surface.impl)
+
+  proc cairo_ps_surface_dsc_begin_page_setup*(surface: ptr Surface00) {.importc, libcairo.}
+#
+  proc psSurfaceDscBeginPageSetup*(surface: Surface) =
+    cairo_ps_surface_dsc_begin_page_setup(surface.impl)
 
 when CAIRO_HAS_SVG_SURFACE:
   type
     SvgVersion* {.size: sizeof(cint), pure.} = enum
-      V1_1, V1_2
-  proc svgSurfaceCreate*(filename: cstring; widthInPoints: cdouble;
-                             heightInPoints: cdouble): Surface {.
-      importc: "cairo_svg_surface_create", libcairo.}
-  proc svgSurfaceCreateForStream*(writeFunc: CairoWriteFuncT;
-                                      closure: pointer; widthInPoints: cdouble;
-                                      heightInPoints: cdouble): Surface {.
-      importc: "cairo_svg_surface_create_for_stream", libcairo.}
-  proc svgSurfaceRestrictToVersion*(surface: Surface;
-                                        version: SvgVersion) {.
-      importc: "cairo_svg_surface_restrict_to_version", libcairo.}
-  proc svgGetVersions*(versions: ptr ptr SvgVersion; numVersions: var cint) {.
-      importc: "cairo_svg_get_versions", libcairo.}
-  proc toString*(version: SvgVersion): cstring {.
-      importc: "cairo_svg_version_to_string", libcairo.}
+      v1_1, v1_2
+
+  proc cairo_svg_surface_create*(filename: cstring; widthInPoints, heightInPoints: cdouble): ptr Surface00 {.
+    importc, libcairo.}
+#
+  proc svgSurfaceCreate*(filename: string; widthInPoints, heightInPoints: float): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_svg_surface_create(filename, widthInPoints.cdouble, heightInPoints.cdouble)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_svg_surface_create_for_stream*(write_func: Write_func00;
+    closure: pointer; widthInPoints, heightInPoints: cdouble): ptr Surface00 {.importc, libcairo.}
+#
+  proc svgSurfaceCreateForstream*(writeFunc: WriteFunc00; closure: pointer; widthInPoints, heightInPoints: float): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_svg_surface_create_for_stream(writeFunc, closure, widthInPoints.cdouble, heightInPoints.cdouble)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_svg_surface_restrict_to_version*(surface: ptr Surface00; version: SvgVersion) {.importc, libcairo.}
+#
+  proc svgSurfaceRestrictToversion*(surface: Surface; version: SvgVersion) =
+    cairo_svg_surface_restrict_to_version(surface.impl, version)
+
+#TODO
+  proc cairo_svg_get_versions*(versions: ptr ptr Svg_version; num_versions: var cint) {.importc, libcairo.}
+#
+  #proc svgGetVersions*(versions: ptr ptr Svg_version; num_versions: var cint)
+  #proc cairo_svg_get_versions*(versions: ptr ptr Svg_version; num_versions: var cint)
+
+  proc cairo_svg_version_to_string*(version: Svg_version): cstring {.importc, libcairo.}
+#
+  proc svgVersionToString*(version: SvgVersion): string =
+    $cairo_svg_version_to_string(version)
 
 when CAIRO_HAS_XML_SURFACE:
-  proc xmlCreate*(filename: cstring): Device {.
-      importc: "cairo_xml_create", libcairo.}
-  proc xmlCreateForStream*(writeFunc: CairoWriteFuncT; closure: pointer): Device {.
-      importc: "cairo_xml_create_for_stream", libcairo.}
-  proc xmlSurfaceCreate*(xml: Device; content: Content;
-                             width: cdouble; height: cdouble): Surface {.
-      importc: "cairo_xml_surface_create", libcairo.}
-  proc xmlForRecordingSurface*(xml: Device;
-                                   surface: Surface): Status {.
-      importc: "cairo_xml_for_recording_surface", libcairo.}
+  proc cairo_xml_create*(filename: cstring): ptr Device00 {.importc, libcairo.}
+#
+  proc xml_create*(filename: string): Device =
+    new(result, deviceDestroy)
+    result.impl = cairo_xml_create(filename)
+    discard cairo_device_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_xml_create_for_stream*(writeFunc: WriteFunc00; closure: pointer): ptr Device00 {.importc, libcairo.}
+#
+  proc xmlCreateForStream*(writeFunc: WriteFunc00; closure: pointer): Device =
+    new(result, deviceDestroy)
+    result.impl = cairo_xml_create_for_stream(writeFunc, closure)
+    discard cairo_device_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_xml_surface_create*(xml: ptr Device00; content: Content; width, height: cdouble): ptr Surface00 {.
+    importc, libcairo.}
+#
+  proc xmlSurfaceCreate*(xml: Device; content: Content; width, height: float): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_xml_surface_create(xml.impl, content, width.cdouble, height.cdouble)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_xml_for_recording_surface*(xml: ptr Device00; surface: ptr Surface00): Status {.importc, libcairo.}
+#
+  proc xmlForRecordingSurface*(xml: Device; surface: Surface): Status =
+    cairo_xml_for_recording_surface(xml.impl, surface.impl)
 
 when CAIRO_HAS_SCRIPT_SURFACE:
   type
     ScriptMode* {.size: sizeof(cint), pure.} = enum
-      ASCII, BINARY
-  proc scriptCreate*(filename: cstring): Device {.
-      importc: "cairo_script_create", libcairo.}
-  proc scriptCreateForStream*(writeFunc: CairoWriteFuncT; closure: pointer): Device {.
-      importc: "cairo_script_create_for_stream", libcairo.}
-  proc scriptWriteComment*(script: Device; comment: cstring; len: cint) {.
-      importc: "cairo_script_write_comment", libcairo.}
-  proc scriptSetMode*(script: Device; mode: ScriptMode) {.
-      importc: "cairo_script_set_mode", libcairo.}
-  proc scriptGetMode*(script: Device): ScriptMode {.
-      importc: "cairo_script_get_mode", libcairo.}
-  proc scriptSurfaceCreate*(script: Device; content: Content;
-                                width: cdouble; height: cdouble): Surface {.
-      importc: "cairo_script_surface_create", libcairo.}
-  proc scriptSurfaceCreateForTarget*(script: Device;
-      target: Surface): Surface {.
-      importc: "cairo_script_surface_create_for_target", libcairo.}
-  proc scriptFromRecordingSurface*(script: Device;
-                                       recordingSurface: Surface): Status {.
-      importc: "cairo_script_from_recording_surface", libcairo.}
+      ascii, binary
+
+  proc cairo_script_create*(filename: cstring): ptr Device00 {.importc, libcairo.}
+#
+  proc scriptCreate*(filename: string): Device =
+    new(result, deviceDestroy)
+    result.impl = cairo_script_create(filename)
+    discard cairo_device_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_script_create_for_stream*(writeFunc: WriteFunc00; closure: pointer): ptr Device00 {.importc, libcairo.}
+#
+  proc scriptCcreateForStream*(writeFunc: WriteFunc00; closure: pointer): Device =
+    new(result, deviceDestroy)
+    result.impl = cairo_script_create_for_stream(writeFunc, closure)
+    discard cairo_device_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_script_write_comment*(script: ptr Device00; comment: cstring; len: cint) {.importc, libcairo.}
+#
+  proc scriptWriteComment*(script: Device; comment: string; len: int) =
+    cairo_script_write_comment(script.impl, comment, len.cint)
+
+  proc cairo_script_set_mode*(script: ptr Device00; mode: ScriptMode) {.importc, libcairo.}
+#
+  proc scriptSetMode*(script: Device; mode: ScriptMode) =
+    cairo_script_set_mode(script.impl, mode)
+
+  proc cairo_script_get_mode*(script: ptr Device00): ScriptMode {.importc, libcairo.}
+#
+  proc scriptGetMode*(script: Device): ScriptMode =
+    cairo_script_get_mode(script.impl)
+
+  proc cairo_script_surface_create*(script: ptr Device00; content: Content; width, height: cdouble): ptr Surface00 {.
+    importc, libcairo.}
+#
+  proc scriptSurfaceCreate*(script: Device; content: Content; width, height: float): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_script_surface_create(script.impl, content, width.cdouble, height.cdouble)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_script_surface_create_for_target*(script: ptr Device00;
+    target: ptr Surface00): ptr Surface00 {.importc, libcairo.}
+#
+  proc scriptSurfaceCreateForTarget*(script: Device; target: Surface): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_script_surface_create_for_target(script.impl, target.impl)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
+
+  proc cairo_script_from_recording_surface*(script: ptr Device00;
+    recordingSurface: ptr Surface00): Status {.importc, libcairo.}
+#
+  proc scriptFromRecordingSurface*(script: Device; recordingSurface: Surface): Status =
+    cairo_script_from_recording_surface(script.impl, recordingSurface.impl)
 
 when CAIRO_HAS_SKIA_SURFACE:
-  proc skiaSurfaceCreate*(format: Format; width: cint; height: cint): Surface {.
-      importc: "cairo_skia_surface_create", libcairo.}
-  proc skiaSurfaceCreateForData*(data: ptr cuchar; format: Format;
-                                     width: cint; height: cint; stride: cint): Surface {.
-      importc: "cairo_skia_surface_create_for_data", libcairo.}
+  proc cairo_skia_surface_create*(format: Format; width, height: cint): ptr Surface00 {.importc, libcairo.}
+#
+  proc skiaSurfaceCreate*(format: Format; width, height: int): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_skia_surface_create(format, width.cint, height.cint)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
 
+#TODO
+  proc cairo_skia_surface_create_for_data*(data: ptr cuchar; format: Format; width, height, stride: cint):
+    ptr Surface00 {.importc, libcairo.}
+#
+  #proc skiaSurfaceCreateForData*(data: ptr cuchar; format: Format; width, height, stride: cint): ptr Surface00
+  #proc cairo_skia_surface_create_for_data*(data: ptr cuchar; format: Format; width, height, stride: cint): ptr Surface00
+
+#TODO
+# seems to be fully undocumented, so we ignore it for now
 when CAIRO_HAS_DRM_SURFACE:
   type
     UdevDevice* = object
-  proc drmDeviceGet*(device: ptr UdevDevice): Device {.
-      importc: "cairo_drm_device_get", libcairo.}
-  proc drmDeviceGetForFd*(fd: cint): Device {.
-      importc: "cairo_drm_device_get_for_fd", libcairo.}
-  proc drmDeviceDefault*(): Device {.
-      importc: "cairo_drm_device_default", libcairo.}
-  proc drmDeviceGetFd*(device: Device): cint {.
-      importc: "cairo_drm_device_get_fd", libcairo.}
-  proc drmDeviceThrottle*(device: Device) {.
-      importc: "cairo_drm_device_throttle", libcairo.}
-  proc drmSurfaceCreate*(device: Device; format: Format;
-                             width: cint; height: cint): Surface {.
-      importc: "cairo_drm_surface_create", libcairo.}
-  proc drmSurfaceCreateForName*(device: Device; name: cuint;
-                                    format: Format; width: cint; height: cint;
-                                    stride: cint): Surface {.
-      importc: "cairo_drm_surface_create_for_name", libcairo.}
-  proc drmSurfaceCreateFromCacheableImage*(device: Device;
-      surface: Surface): Surface {.
-      importc: "cairo_drm_surface_create_from_cacheable_image", libcairo.}
-  proc drmSurfaceEnableScanOut*(surface: Surface): Status {.
-      importc: "cairo_drm_surface_enable_scan_out", libcairo.}
-  proc drmSurfaceGetHandle*(surface: Surface): cuint {.
-      importc: "cairo_drm_surface_get_handle", libcairo.}
-  proc drmSurfaceGetName*(surface: Surface): cuint {.
-      importc: "cairo_drm_surface_get_name", libcairo.}
-  proc drmSurfaceGetFormat*(surface: Surface): Format {.
-      importc: "cairo_drm_surface_get_format", libcairo.}
-  proc drmSurfaceGetWidth*(surface: Surface): cint {.
-      importc: "cairo_drm_surface_get_width", libcairo.}
-  proc drmSurfaceGetHeight*(surface: Surface): cint {.
-      importc: "cairo_drm_surface_get_height", libcairo.}
-  proc drmSurfaceGetStride*(surface: Surface): cint {.
-      importc: "cairo_drm_surface_get_stride", libcairo.}
-  proc drmSurfaceMapToImage*(surface: Surface): Surface {.
-      importc: "cairo_drm_surface_map_to_image", libcairo.}
-  proc drmSurfaceUnmap*(drmSurface: Surface;
-                            imageSurface: Surface) {.
-      importc: "cairo_drm_surface_unmap", libcairo.}
+
+  proc cairo_drm_device_get*(device: ptr Udev_device): ptr Device00 {.importc, libcairo.}
+  proc cairo_drm_device_get_for_fd*(fd: cint): ptr Device00 {.importc, libcairo.}
+  proc cairo_drm_device_default*(): ptr Device00 {.importc, libcairo.}
+  proc cairo_drm_device_get_fd*(device: ptr Device00): cint {.importc, libcairo.}
+  proc cairo_drm_device_throttle*(device: ptr Device00) {.importc, libcairo.}
+  proc cairo_drm_surface_create*(device: ptr Device00; format: Format; width, height: cint): ptr Surface00 {.
+    importc, libcairo.}
+  proc cairo_drm_surface_create_for_name*(device: ptr Device00; name: cuint; format: Format; width, height, stride: cint):
+    ptr Surface00 {.importc, libcairo.}
+  proc cairo_drm_surface_create_from_cacheable_image*(device: ptr Device00;
+      surface: ptr Surface00): ptr Surface00 {.importc, libcairo.}
+  proc cairo_drm_surface_enable_scan_out*(surface: ptr Surface00): Status {.importc, libcairo.}
+  proc cairo_drm_surface_get_handle*(surface: ptr Surface00): cuint {.importc, libcairo.}
+  proc cairo_drm_surface_get_name*(surface: ptr Surface00): cuint {.importc, libcairo.}
+  proc cairo_drm_surface_get_format*(surface: ptr Surface00): Format {.importc, libcairo.}
+  proc cairo_drm_surface_get_width*(surface: ptr Surface00): cint {.importc, libcairo.}
+  proc cairo_drm_surface_get_height*(surface: ptr Surface00): cint {.importc, libcairo.}
+  proc cairo_drm_surface_get_stride*(surface: ptr Surface00): cint {.importc, libcairo.}
+  proc cairo_drm_surface_map_to_image*(surface: ptr Surface00): ptr Surface00 {.importc, libcairo.}
+  proc cairo_drm_surface_unmap*(drm_surface: ptr Surface00; imageSurface: ptr Surface00) {.importc, libcairo.}
 
 when CAIRO_HAS_TEE_SURFACE:
-  proc teeSurfaceCreate*(master: Surface): Surface {.
-      importc: "cairo_tee_surface_create", libcairo.}
-  proc teeSurfaceAdd*(surface: Surface; target: Surface) {.
-      importc: "cairo_tee_surface_add", libcairo.}
-  proc teeSurfaceRemove*(surface: Surface; target: Surface) {.
-      importc: "cairo_tee_surface_remove", libcairo.}
-  proc teeSurfaceIndex*(surface: Surface; index: cuint): Surface {.
-      importc: "cairo_tee_surface_index", libcairo.}
+  proc cairo_tee_surface_create*(master: ptr Surface00): ptr Surface00 {.importc, libcairo.}
+#
+  proc teeSurfaceCreate*(master: Surface): Surface =
+    new(result, surfaceDestroy)
+    result.impl = cairo_tee_surface_create(master.impl)
+    discard cairo_surface_set_user_data(result.impl, NUDK, cast[pointer](result), gcuref)
 
+  proc cairo_tee_surface_add*(surface: ptr Surface00; target: ptr Surface00) {.importc, libcairo.}
+#
+  proc teeSurfaceAdd*(surface: Surface; target: Surface) =
+    cairo_tee_surface_add(surface.impl, target.impl)
+
+  proc cairo_tee_surface_remove*(surface: ptr Surface00; target: ptr Surface00) {.importc, libcairo.}
+#
+  proc teeSurfaceRemove*(surface: Surface; target: Surface) =
+    cairo_tee_surface_remove(surface.impl, target.impl)
+
+  proc cairo_tee_surface_index*(surface: ptr Surface00; index: cuint): ptr Surface00 {.importc, libcairo.}
+#
+  proc teeSurfaceIndex*(surface: Surface; index: int): Surface =
+    discard cairo_tee_surface_index(surface.impl, index.cuint)
+    return surface
+
+# 2786 lines

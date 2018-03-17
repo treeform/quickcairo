@@ -4,8 +4,8 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.ARGB32, 256, 256)
-  ctx = serface.create()
+  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = serface.newContext()
 
 # a custom shape that could be wrapped in a function
 var
@@ -25,9 +25,9 @@ ctx.arc(x + radius, y + height - radius, radius, 90 * degrees, 180 * degrees)
 ctx.arc(x + radius, y + radius, radius, 180 * degrees, 270 * degrees)
 ctx.closePath()
 
-ctx.setSourceRgb(0.5, 0.5, 1)
+ctx.setSource(0.5, 0.5, 1)
 ctx.fillPreserve()
-ctx.setSourceRgba(0.5, 0, 0, 0.5)
+ctx.setSource(0.5, 0, 0, 0.5)
 ctx.setLineWidth(10.0)
 ctx.stroke()
 

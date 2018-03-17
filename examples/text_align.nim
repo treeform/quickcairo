@@ -4,16 +4,16 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.ARGB32, 256, 256)
-  ctx = serface.create()
+  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = serface.newContext()
 
-ctx.selectFontFace("Sans", FONT_SLANT.NORMAL, FONT_WEIGHT.NORMAL)
+ctx.selectFontFace("Sans", FONT_SLANT.normal, FONT_WEIGHT.normal)
 ctx.setFontSize(52.0)
 
 var
   text = "cairo"
-  extents: TextExtentsObj
-ctx.text_extents(text, addr extents)
+  extents: TextExtents
+ctx.textExtents(text, extents)
 
 var
   x = 128.0 - (extents.width / 2 + extents.xBearing)
@@ -23,7 +23,7 @@ ctx.moveTo(x, y)
 ctx.showText(text)
 
 # draw helping lines
-ctx.setSourceRgba(1, 0.2, 0.2, 0.6)
+ctx.setSource(1, 0.2, 0.2, 0.6)
 ctx.setLineWidth(6.0)
 ctx.arc(x, y, 10.0, 0, 2*PI)
 ctx.fill()

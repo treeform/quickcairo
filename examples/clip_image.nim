@@ -4,8 +4,8 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.ARGB32, 256, 256)
-  ctx = serface.create()
+  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = serface.newContext()
 
 ctx.arc(128.0, 128.0, 76.8, 0, 2*PI)
 ctx.clip()
@@ -21,7 +21,6 @@ ctx.scale(256.0 / w, 256.0 / h)
 ctx.setSourceSurface(image, 0, 0)
 ctx.paint()
 
-image.destroy()
 ctx.stroke()
 
 discard serface.writeToPng("examples/clip_image.png")

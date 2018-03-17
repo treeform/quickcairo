@@ -4,8 +4,8 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.ARGB32, 256, 256)
-  ctx = serface.create()
+  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = serface.newContext()
 
 var
   x=25.6
@@ -23,7 +23,7 @@ ctx.curveTo(x1, y1, x2, y2, x3, y3)
 ctx.setLineWidth( 10.0)
 ctx.stroke()
 
-ctx.setSourceRgba(1, 0.2, 0.2, 0.6)
+ctx.setSource(1, 0.2, 0.2, 0.6)
 ctx.setLineWidth(6.0)
 ctx.moveTo(x, y)
 ctx.lineTo(x1, y1)
