@@ -6,6 +6,8 @@ import math
 var
   serface = imageSurfaceCreate(FORMAT.ARGB32, 256, 256)
   ctx = serface.create()
+
+var
   dashes = @[
     50.0,  # ink
     10.0,  # skip

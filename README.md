@@ -108,6 +108,8 @@ ctx.stroke()
 
 ## example: examples\dash.nim
 ```nim
+
+var
   dashes = @[
     50.0,  # ink
     10.0,  # skip
