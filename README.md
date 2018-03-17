@@ -1,5 +1,4 @@
-cairo
-=========
+# cairo
 
 Nim cairo wrapper
 
@@ -8,7 +7,7 @@ Nim cairo wrapper
 ```nim
 
 ```
-![GitHub Logo](examples\arc.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\arc.png)
 
 ## example: examples\clip.nim
 ```nim
@@ -28,7 +27,7 @@ ctx.setLineWidth(10.0)
 ctx.stroke()
 
 ```
-![GitHub Logo](examples\clip.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\clip.png)
 
 ## example: examples\clip_image.nim
 ```nim
@@ -51,7 +50,7 @@ image.destroy()
 ctx.stroke()
 
 ```
-![GitHub Logo](examples\clip_image.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\clip_image.png)
 
 ## example: examples\curve_to.nim
 ```nim
@@ -81,7 +80,7 @@ ctx.lineTo(x3, y3)
 ctx.stroke()
 
 ```
-![GitHub Logo](examples\curve_to.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\curve_to.png)
 
 ## example: examples\dash.nim
 ```nim
@@ -104,7 +103,7 @@ ctx.curveTo(51.2, 230.4, 51.2, 128.0, 128.0, 128.0)
 ctx.stroke()
 
 ```
-![GitHub Logo](examples\dash.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\dash.png)
 
 ## example: examples\fill_and_stroke.nim
 ```nim
@@ -128,7 +127,7 @@ ctx.setSourceRgb(0, 0, 0)
 ctx.stroke()
 
 ```
-![GitHub Logo](examples\fill_and_stroke.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\fill_and_stroke.png)
 
 ## example: examples\gradient.nim
 ```nim
@@ -150,7 +149,7 @@ ctx.fill()
 radialGradient.destroy()
 
 ```
-![GitHub Logo](examples\gradient.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\gradient.png)
 
 ## example: examples\image.nim
 ```nim
@@ -172,7 +171,7 @@ image.destroy()
 ctx.stroke()
 
 ```
-![GitHub Logo](examples\image.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\image.png)
 
 ## example: examples\image_pattern.nim
 ```nim
@@ -202,7 +201,7 @@ ctx.fill()
 pattern.destroy()
 image.destroy()
 ```
-![GitHub Logo](examples\image_pattern.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\image_pattern.png)
 
 ## example: examples\line_cap.nim
 ```nim
@@ -233,7 +232,7 @@ ctx.lineTo(192.0, 200.0)
 ctx.stroke()
 
 ```
-![GitHub Logo](examples\line_cap.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\line_cap.png)
 
 ## example: examples\line_join.nim
 ```nim
@@ -258,7 +257,7 @@ ctx.setLineJoin(LineJoin.ROUND)
 ctx.stroke()
 
 ```
-![GitHub Logo](examples\line_join.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\line_join.png)
 
 ## example: examples\rounded_rectangle.nim
 ```nim
@@ -288,7 +287,7 @@ ctx.setLineWidth(10.0)
 ctx.stroke()
 
 ```
-![GitHub Logo](examples\rounded_rectangle.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\rounded_rectangle.png)
 
 ## example: examples\text.nim
 ```nim
@@ -316,7 +315,7 @@ ctx.fill()
 
 
 ```
-![GitHub Logo](examples\text.png)
+![example output](https://github.com/treeform/cairo/raw/master/examples\text.png)
 
 ## example: examples\text_align.nim
 ```nim
@@ -348,10 +347,7 @@ ctx.relLineTo(256, 0)
 ctx.stroke()
 
 ```
-![GitHub Logo](examples\text_align.png)
-
-
-
+![example output](https://github.com/treeform/cairo/raw/master/examples\text_align.png)
 
 Automatically generated from latest header files of cairo 1.15
 
