@@ -1,6 +1,6 @@
 # original example on https://cairographics.org/samples/
 
-import ../cairo/cairo
+import cairo
 import math
 
 var
@@ -25,4 +25,4 @@ ctx.fillPreserve()
 ctx.setSourceRgb(0, 0, 0)
 ctx.stroke()
 
-discard serface.writeToPng("fill_and_stroke.png")
+discard serface.writeToPng("examples/fill_and_stroke.png")

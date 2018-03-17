@@ -1,6 +1,6 @@
   # original example on https://cairographics.org/samples/
 
-import ../cairo/cairo
+import cairo
 import math
 
 var
@@ -33,4 +33,4 @@ ctx.moveTo(0, 128.0)
 ctx.relLineTo(256, 0)
 ctx.stroke()
 
-discard serface.writeToPng("text_align.png")
+discard serface.writeToPng("examples/text_align.png")

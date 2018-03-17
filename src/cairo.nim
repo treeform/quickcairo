@@ -1,5 +1,5 @@
  {.deadCodeElim: on.}
-include "cairo_pragma.nim"
+include "cairo/cairo_pragma.nim"
 const
   CAIRO_HAS_TEE_SURFACE = true
   CAIRO_HAS_DRM_SURFACE = true

@@ -1,6 +1,6 @@
 # original example on https://cairographics.org/samples/
 
-import ../cairo/cairo
+import cairo
 import math
 
 var
@@ -31,4 +31,4 @@ ctx.fill()
 
 pattern.destroy()
 image.destroy()
-discard serface.writeToPng("image_pattern.png")
+discard serface.writeToPng("examples/image_pattern.png")

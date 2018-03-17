@@ -1,6 +1,6 @@
 # original example on https://cairographics.org/samples/
 
-import ../cairo/cairo
+import cairo
 import math
 
 var
@@ -24,4 +24,4 @@ ctx.curveTo(51.2, 230.4, 51.2, 128.0, 128.0, 128.0)
 
 ctx.stroke()
 
-discard serface.writeToPng("dash.png")
+discard serface.writeToPng("examples/dash.png")

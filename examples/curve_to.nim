@@ -1,6 +1,6 @@
 # original example on https://cairographics.org/samples/
 
-import ../cairo/cairo
+import cairo
 import math
 
 var
@@ -31,4 +31,4 @@ ctx.moveTo(x2, y2)
 ctx.lineTo(x3, y3)
 ctx.stroke()
 
-discard serface.writeToPng("curveTo.png")
+discard serface.writeToPng("examples/curveTo.png")

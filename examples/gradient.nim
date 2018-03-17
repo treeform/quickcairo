@@ -1,6 +1,6 @@
 # original example on https://cairographics.org/samples/
 
-import ../cairo/cairo
+import cairo
 import math
 
 var
@@ -23,4 +23,4 @@ ctx.arc(128.0, 128.0, 76.8, 0, 2 * PI)
 ctx.fill()
 radialGradient.destroy()
 
-discard serface.writeToPng("gradient.png")
+discard serface.writeToPng("examples/gradient.png")

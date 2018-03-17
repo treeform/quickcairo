@@ -1,6 +1,6 @@
 # original example on https://cairographics.org/samples/
 
-import ../cairo/cairo
+import cairo
 import math
 
 var
@@ -26,4 +26,4 @@ ctx.relLineTo(51.2, 51.2)
 ctx.setLineJoin(LineJoin.ROUND)
 ctx.stroke()
 
-discard serface.writeToPng("line_join.png")
+discard serface.writeToPng("examples/line_join.png")

@@ -1,6 +1,6 @@
 # original example on https://cairographics.org/samples/
 
-import ../cairo/cairo
+import cairo
 import math
 
 var
@@ -21,4 +21,4 @@ ctx.lineTo(0, 256)
 ctx.setLineWidth(10.0)
 ctx.stroke()
 
-discard serface.writeToPng("clip.png")
+discard serface.writeToPng("examples/clip.png")

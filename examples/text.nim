@@ -1,6 +1,6 @@
 # original example on https://cairographics.org/samples/
 
-import ../cairo/cairo
+import cairo
 import math
 
 var
@@ -29,4 +29,4 @@ ctx.arc(70.0, 165.0, 5.12, 0, 2*PI)
 ctx.fill()
 
 
-discard serface.writeToPng("text.png")
+discard serface.writeToPng("examples/text.png")

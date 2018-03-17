@@ -1,6 +1,6 @@
 # original example on https://cairographics.org/samples/
 
-import ../cairo/cairo
+import cairo
 import math
 
 var
@@ -23,4 +23,4 @@ ctx.paint()
 image.destroy()
 ctx.stroke()
 
-discard serface.writeToPng("image.png")
+discard serface.writeToPng("examples/image.png")

@@ -1,6 +1,6 @@
 # original example on https://cairographics.org/samples/
 
-import ../cairo/cairo
+import cairo
 import math
 
 var
@@ -31,4 +31,4 @@ ctx.setSourceRgba(0.5, 0, 0, 0.5)
 ctx.setLineWidth(10.0)
 ctx.stroke()
 
-discard serface.writeToPng("rounded_rectangle.png")
+discard serface.writeToPng("examples/rounded_rectangle.png")

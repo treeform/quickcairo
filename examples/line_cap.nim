@@ -1,6 +1,6 @@
 # original example on https://cairographics.org/samples/
 
-import ../cairo/cairo
+import cairo
 import math
 
 var
@@ -32,4 +32,4 @@ ctx.moveTo(192.0, 50.0)
 ctx.lineTo(192.0, 200.0)
 ctx.stroke()
 
-discard serface.writeToPng("line_cap.png")
+discard serface.writeToPng("examples/line_cap.png")
