@@ -8,7 +8,7 @@ var
   ctx = serface.create()
 
 var
-  image = imageSurfaceCreateFromPng("data/romedalen.png")
+  image = imageSurfaceCreateFromPng("examples/data/romedalen.png")
   w = float image.imageSurfaceGetWidth()
   h = float image.imageSurfaceGetHeight()
 

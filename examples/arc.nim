@@ -5,8 +5,9 @@ import math
 
 var
   serface = imageSurfaceCreate(FORMAT.ARGB32, 256, 256)
-  ctx= serface.create()
+  ctx = serface.create()
 
+var
   xc = 128.0
   yc = 128.0
   radius = 100.0

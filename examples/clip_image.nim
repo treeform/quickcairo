@@ -12,7 +12,7 @@ ctx.clip()
 ctx.new_path() # path not consumed by clip()
 
 var
-  image = imageSurfaceCreateFromPng("data/romedalen.png")
+  image = imageSurfaceCreateFromPng("examples/data/romedalen.png")
   w = float image.imageSurfaceGetWidth()
   h = float image.imageSurfaceGetHeight()
 

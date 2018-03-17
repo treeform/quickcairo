@@ -34,6 +34,9 @@ for kind, path in walkDir("examples"):
 
 
 echo """
+
+# About
+
 Automatically generated from latest header files of cairo 1.15
 
 Main module is cairo.nim, which contains also PDF, SVG and other

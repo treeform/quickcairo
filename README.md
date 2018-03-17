@@ -6,6 +6,30 @@ Nim cairo wrapper
 ## example: examples\arc.nim
 ```nim
 
+var
+  xc = 128.0
+  yc = 128.0
+  radius = 100.0
+  angle1 = 45.0  * PI / 180.0  # angles are specified
+  angle2 = 180.0 * PI / 180.0  # in radians
+
+ctx.setLineWidth(10.0)
+ctx.arc(xc, yc, radius, angle1, angle2)
+ctx.stroke()
+
+# draw helping lines
+ctx.setSourceRgba(1, 0.2, 0.2, 0.6)
+ctx.setLineWidth(6.0)
+
+ctx.arc(xc, yc, 10.0, 0, 2*PI)
+ctx.fill()
+
+ctx.arc(xc, yc, radius, angle1, angle1)
+ctx.lineTo(xc, yc)
+ctx.arc(xc, yc, radius, angle2, angle2)
+ctx.lineTo(xc, yc)
+ctx.stroke()
+
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/arc.png)
 
@@ -37,7 +61,7 @@ ctx.clip()
 ctx.new_path() # path not consumed by clip()
 
 var
-  image = imageSurfaceCreateFromPng("data/romedalen.png")
+  image = imageSurfaceCreateFromPng("examples/data/romedalen.png")
   w = float image.imageSurfaceGetWidth()
   h = float image.imageSurfaceGetHeight()
 
@@ -155,7 +179,7 @@ radialGradient.destroy()
 ```nim
 
 var
-  image = imageSurfaceCreateFromPng("data/romedalen.png")
+  image = imageSurfaceCreateFromPng("examples/data/romedalen.png")
   w = float image.imageSurfaceGetWidth()
   h = float image.imageSurfaceGetHeight()
 
@@ -177,7 +201,7 @@ ctx.stroke()
 ```nim
 
 var
-  image = imageSurfaceCreateFromPng("data/romedalen.png")
+  image = imageSurfaceCreateFromPng("examples/data/romedalen.png")
   w = float image.imageSurfaceGetWidth()
   h = float image.imageSurfaceGetHeight()
 
@@ -348,6 +372,9 @@ ctx.stroke()
 
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/text_align.png)
+
+
+# About
 
 Automatically generated from latest header files of cairo 1.15
 
