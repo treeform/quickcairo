@@ -372,7 +372,7 @@ ctx.stroke()
 
 # About
 
-Based on the work form: https://github.com/ngtk3/nim-cairo
+Based on the work form: https://github.com/StefanSalewski/gintro/blob/master/gintro/cairo.nim
 
 Automatically generated from latest header files of cairo 1.15
 
