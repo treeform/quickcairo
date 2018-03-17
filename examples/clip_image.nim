@@ -18,7 +18,7 @@ var
 
 ctx.scale(256.0 / w, 256.0 / h)
 
-ctx.set_source_surface(image, 0, 0)
+ctx.setSourceSurface(image, 0, 0)
 ctx.paint()
 
 image.destroy()

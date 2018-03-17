@@ -1,4 +1,4 @@
-# original example on https://cairographics.org/samples/
+  # original example on https://cairographics.org/samples/
 
 import ../cairo/cairo
 import math
@@ -14,7 +14,7 @@ var
   text = "cairo"
   extents: TextExtentsObj
 ctx.text_extents(text, addr extents)
-echo repr(extents)
+
 var
   x = 128.0 - (extents.width / 2 + extents.xBearing)
   y = 128.0 - (extents.height / 2 + extents.yBearing)

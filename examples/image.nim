@@ -17,7 +17,7 @@ ctx.rotate(45 * PI/180)
 ctx.scale(256.0 / w, 256.0 / h)
 ctx.translate(-0.5 * w, -0.5 * h)
 
-ctx.set_source_surface(image, 0, 0)
+ctx.setSourceSurface(image, 0, 0)
 ctx.paint()
 
 image.destroy()

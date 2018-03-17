@@ -1,4 +1,4 @@
-nim-cairo
+cairo
 =========
 
 Nim cairo wrapper

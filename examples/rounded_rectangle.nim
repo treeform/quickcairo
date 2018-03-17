@@ -18,17 +18,17 @@ var
   radius = corner_radius / aspect
   degrees = PI / 180.0
 
-ctx.new_sub_path()
+ctx.newSubPath()
 ctx.arc(x + width - radius, y + radius, radius, -90 * degrees, 0 * degrees)
 ctx.arc(x + width - radius, y + height - radius, radius, 0 * degrees, 90 * degrees)
 ctx.arc(x + radius, y + height - radius, radius, 90 * degrees, 180 * degrees)
 ctx.arc(x + radius, y + radius, radius, 180 * degrees, 270 * degrees)
-ctx.close_path()
+ctx.closePath()
 
-ctx.set_source_rgb(0.5, 0.5, 1)
-ctx.fill_preserve()
-ctx.set_source_rgba(0.5, 0, 0, 0.5)
-ctx.set_line_width(10.0)
+ctx.setSourceRgb(0.5, 0.5, 1)
+ctx.fillPreserve()
+ctx.setSourceRgba(0.5, 0, 0, 0.5)
+ctx.setLineWidth(10.0)
 ctx.stroke()
 
 discard serface.writeToPng("rounded_rectangle.png")
