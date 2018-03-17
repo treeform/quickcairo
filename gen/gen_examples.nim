@@ -29,7 +29,7 @@ for kind, path in walkDir("examples"):
     echo "```nim"
     echo innerCode
     echo "```"
-    echo "![example output](https://github.com/treeform/cairo/raw/master/", path.replace(".nim", ".png"), ")"
+    echo "![example output](https://github.com/treeform/cairo/raw/master/", path.replace(".nim", ".png").replace("\\", "/"), ")"
     echo ""
 
 
