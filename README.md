@@ -1,9 +1,9 @@
 # cairo
 
-Nim cairo wrapper
+Nim cairo wrapper, solving your vector and text drawing needs.
 
 
-## example: examples\arc.nim
+## example: examples/arc.nim
 ```nim
 
 var
@@ -33,7 +33,7 @@ ctx.stroke()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/arc.png)
 
-## example: examples\clip.nim
+## example: examples/clip.nim
 ```nim
 
 ctx.arc(128.0, 128.0, 76.8, 0, 2 * PI)
@@ -53,7 +53,7 @@ ctx.stroke()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/clip.png)
 
-## example: examples\clip_image.nim
+## example: examples/clip_image.nim
 ```nim
 
 ctx.arc(128.0, 128.0, 76.8, 0, 2*PI)
@@ -76,7 +76,7 @@ ctx.stroke()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/clip_image.png)
 
-## example: examples\curve_to.nim
+## example: examples/curve_to.nim
 ```nim
 
 var
@@ -106,7 +106,7 @@ ctx.stroke()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/curve_to.png)
 
-## example: examples\dash.nim
+## example: examples/dash.nim
 ```nim
 
 var
@@ -131,7 +131,7 @@ ctx.stroke()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/dash.png)
 
-## example: examples\fill_and_stroke.nim
+## example: examples/fill_and_stroke.nim
 ```nim
 
 ctx.moveTo(128.0, 25.6)
@@ -155,7 +155,7 @@ ctx.stroke()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/fill_and_stroke.png)
 
-## example: examples\gradient.nim
+## example: examples/gradient.nim
 ```nim
 
 var linerGradient = patternCreateLinear(0.0, 0.0,  0.0, 256.0)
@@ -177,7 +177,7 @@ radialGradient.destroy()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/gradient.png)
 
-## example: examples\image.nim
+## example: examples/image.nim
 ```nim
 
 var
@@ -199,7 +199,7 @@ ctx.stroke()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/image.png)
 
-## example: examples\image_pattern.nim
+## example: examples/image_pattern.nim
 ```nim
 
 var
@@ -229,7 +229,7 @@ image.destroy()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/image_pattern.png)
 
-## example: examples\line_cap.nim
+## example: examples/line_cap.nim
 ```nim
 
 ctx.setLineWidth(30.0)
@@ -260,7 +260,7 @@ ctx.stroke()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/line_cap.png)
 
-## example: examples\line_join.nim
+## example: examples/line_join.nim
 ```nim
 
 ctx.setLineWidth(40.96)
@@ -285,7 +285,7 @@ ctx.stroke()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/line_join.png)
 
-## example: examples\rounded_rectangle.nim
+## example: examples/rounded_rectangle.nim
 ```nim
 
 # a custom shape that could be wrapped in a function
@@ -315,7 +315,7 @@ ctx.stroke()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/rounded_rectangle.png)
 
-## example: examples\text.nim
+## example: examples/text.nim
 ```nim
 
 ctx.selectFontFace("Sans", FONT_SLANT.NORMAL, FONT_WEIGHT.NORMAL)
@@ -343,7 +343,7 @@ ctx.fill()
 ```
 ![example output](https://github.com/treeform/cairo/raw/master/examples/text.png)
 
-## example: examples\text_align.nim
+## example: examples/text_align.nim
 ```nim
 
 ctx.selectFontFace("Sans", FONT_SLANT.NORMAL, FONT_WEIGHT.NORMAL)
@@ -377,6 +377,8 @@ ctx.stroke()
 
 
 # About
+
+Based on the work form: https://github.com/ngtk3/nim-cairo
 
 Automatically generated from latest header files of cairo 1.15
 

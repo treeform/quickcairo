@@ -7,7 +7,7 @@ import strutils
 echo """
 # cairo
 
-Nim cairo wrapper
+Nim cairo wrapper, solving your vector and text drawing needs.
 
 """
 
@@ -25,7 +25,7 @@ for kind, path in walkDir("examples"):
   if path.endsWith("nim"):
     let code = readFile(path)
     let innerCode = code.cutBetween("ctx = serface.create()\n", "\ndiscard serface.writeToPng(")
-    echo "## example: ", path
+    echo "## example: ", path.replace("\\", "/")
     echo "```nim"
     echo innerCode
     echo "```"
@@ -36,6 +36,8 @@ for kind, path in walkDir("examples"):
 echo """
 
 # About
+
+Based on the work form: https://github.com/ngtk3/nim-cairo
 
 Automatically generated from latest header files of cairo 1.15
 
