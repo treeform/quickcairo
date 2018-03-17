@@ -31,4 +31,4 @@ ctx.moveTo(x2, y2)
 ctx.lineTo(x3, y3)
 ctx.stroke()
 
-discard serface.writeToPng("examples/curveTo.png")
+discard serface.writeToPng("examples/curve_to.png")
