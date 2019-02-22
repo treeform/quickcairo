@@ -1,6 +1,6 @@
 # Package
 
-version      = "1.15.2"
+version      = "1.15.3"
 author       = "Stefan Salewski"
 description  = "Wrapper for cairo, a vector graphics library with display and print output"
 license      = "MIT"
@@ -9,7 +9,7 @@ srcDir       = "src"
 
 # Deps
 
-requires "nim >= 0.17.0"
+requires "nim >= 0.19.0"
 
 
 task test, "Tests the examples":
