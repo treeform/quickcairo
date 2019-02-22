@@ -31,7 +31,7 @@ ctx.lineTo(xc, yc)
 ctx.stroke()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/arc.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/arc.png)
 
 ## example: examples/clip.nim
 ```nim
@@ -51,7 +51,7 @@ ctx.setLineWidth(10.0)
 ctx.stroke()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/clip.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/clip.png)
 
 ## example: examples/clip_image.nim
 ```nim
@@ -73,7 +73,7 @@ ctx.paint()
 ctx.stroke()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/clip_image.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/clip_image.png)
 
 ## example: examples/curve_to.nim
 ```nim
@@ -103,7 +103,7 @@ ctx.lineTo(x3, y3)
 ctx.stroke()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/curve_to.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/curve_to.png)
 
 ## example: examples/dash.nim
 ```nim
@@ -128,7 +128,7 @@ ctx.curveTo(51.2, 230.4, 51.2, 128.0, 128.0, 128.0)
 ctx.stroke()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/dash.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/dash.png)
 
 ## example: examples/fill_and_stroke.nim
 ```nim
@@ -152,7 +152,7 @@ ctx.setSource(0, 0, 0)
 ctx.stroke()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/fill_and_stroke.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/fill_and_stroke.png)
 
 ## example: examples/gradient.nim
 ```nim
@@ -172,7 +172,7 @@ ctx.arc(128.0, 128.0, 76.8, 0, 2 * PI)
 ctx.fill()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/gradient.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/gradient.png)
 
 ## example: examples/image.nim
 ```nim
@@ -193,7 +193,7 @@ ctx.paint()
 ctx.stroke()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/image.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/image.png)
 
 ## example: examples/image_pattern.nim
 ```nim
@@ -221,7 +221,7 @@ ctx.rectangle(0, 0, 256.0, 256.0)
 ctx.fill()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/image_pattern.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/image_pattern.png)
 
 ## example: examples/line_cap.nim
 ```nim
@@ -252,7 +252,7 @@ ctx.lineTo(192.0, 200.0)
 ctx.stroke()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/line_cap.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/line_cap.png)
 
 ## example: examples/line_join.nim
 ```nim
@@ -277,7 +277,7 @@ ctx.setLineJoin(LineJoin.round)
 ctx.stroke()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/line_join.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/line_join.png)
 
 ## example: examples/rounded_rectangle.nim
 ```nim
@@ -307,7 +307,7 @@ ctx.setLineWidth(10.0)
 ctx.stroke()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/rounded_rectangle.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/rounded_rectangle.png)
 
 ## example: examples/text.nim
 ```nim
@@ -335,7 +335,7 @@ ctx.fill()
 
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/text.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/text.png)
 
 ## example: examples/text_align.nim
 ```nim
@@ -367,29 +367,22 @@ ctx.relLineTo(256, 0)
 ctx.stroke()
 
 ```
-![example output](https://github.com/treeform/cairo/raw/master/examples/text_align.png)
+![example output](https://github.com/treeform/quickcairo/raw/master/examples/text_align.png)
+
+
+# Realtime
+
+![realtime example](https://github.com/treeform/quickcairo/raw/master/examples/realtime.png)
+
+You can also use cairo for real time graphics using. Here are examples on how to use cairo with:
+  * [SDL2](https://github.com/treeform/quickcairo/blob/master/examples/realtime_sdl2.nim)
+  * [GLUT](https://github.com/treeform/quickcairo/blob/master/examples/realtime_glut.nim)
+  * [GLFW](https://github.com/treeform/quickcairo/blob/master/examples/realtime_glfw.nim)
 
 
 # About
 
 Based on the work form: https://github.com/StefanSalewski/gintro/blob/master/gintro/cairo.nim
+Forked form: https://github.com/ngtk3/nim-cairo
 
-Automatically generated from latest header files of cairo 1.15
-
-Main module is cairo.nim, which contains also PDF, SVG and other
-stuff not depending on other modules.
-
-Xlib, win32, GL is supported by cairo_xlib.nim, cairo_win32.nim
-and cairo_gl.nim (still untested.)
-
-Other backends like xcb, ft, quartz are still unsupported because
-imported wrappers are still unavailable.
-
-To generate the wrapper files: cd into gen directory, make sure path
-to cairo source directory containing C header files is correct in
-file prep_cairo.sh. Then execute command "bash prep_cairo.sh".
-This script executes a few tiny Ruby scripts, so you should ensure
-that Ruby is installed on your computer -- perl also.
-
-Script works with latest c2nim 0.9.8!
 
