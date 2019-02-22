@@ -24,7 +24,7 @@ proc cutBetween(str, a, b: string): string =
 for kind, path in walkDir("examples"):
   if path.endsWith("nim"):
     let code = readFile(path)
-    let innerCode = code.cutBetween("serface.newContext()\n", "\ndiscard serface.writeToPng(")
+    let innerCode = code.cutBetween("surface.newContext()\n", "\ndiscard surface.writeToPng(")
     echo "## example: ", path.replace("\\", "/")
     echo "```nim"
     echo innerCode

@@ -4,8 +4,8 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
-  ctx = serface.newContext()
+  surface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = surface.newContext()
 
 var
   dashes = @[
@@ -26,4 +26,4 @@ ctx.curveTo(51.2, 230.4, 51.2, 128.0, 128.0, 128.0)
 
 ctx.stroke()
 
-discard serface.writeToPng("examples/dash.png")
+discard surface.writeToPng("examples/dash.png")

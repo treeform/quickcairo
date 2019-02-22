@@ -4,8 +4,8 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
-  ctx = serface.newContext()
+  surface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = surface.newContext()
 
 # a custom shape that could be wrapped in a function
 var
@@ -31,4 +31,4 @@ ctx.setSource(0.5, 0, 0, 0.5)
 ctx.setLineWidth(10.0)
 ctx.stroke()
 
-discard serface.writeToPng("examples/rounded_rectangle.png")
+discard surface.writeToPng("examples/rounded_rectangle.png")

@@ -4,8 +4,8 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
-  ctx = serface.newContext()
+  surface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = surface.newContext()
 
 ctx.setLineWidth(30.0)
 ctx.setLineCap(LineCap.butt) # default
@@ -32,4 +32,4 @@ ctx.moveTo(192.0, 50.0)
 ctx.lineTo(192.0, 200.0)
 ctx.stroke()
 
-discard serface.writeToPng("examples/line_cap.png")
+discard surface.writeToPng("examples/line_cap.png")

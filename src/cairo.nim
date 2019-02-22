@@ -1855,6 +1855,9 @@ proc cairo_image_surface_create_for_data*(data: ptr cuchar; format: Format; widt
   ptr Surface00 {.importc, libcairo.}
 
 proc cairo_image_surface_get_data*(surface: ptr Surface00): ptr cuchar {.importc, libcairo.}
+#
+proc imageSurfaceGetData*(surface: Surface): ptr =
+  cairo_image_surface_get_data(surface.impl)
 
 proc cairo_image_surface_get_format*(surface: ptr Surface00): Format {.importc, libcairo.}
 #

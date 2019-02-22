@@ -4,8 +4,8 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
-  ctx = serface.newContext()
+  surface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = surface.newContext()
 
 ctx.selectFontFace("Sans", FONT_SLANT.normal, FONT_WEIGHT.normal)
 ctx.setFontSize(52.0)
@@ -33,4 +33,4 @@ ctx.moveTo(0, 128.0)
 ctx.relLineTo(256, 0)
 ctx.stroke()
 
-discard serface.writeToPng("examples/text_align.png")
+discard surface.writeToPng("examples/text_align.png")

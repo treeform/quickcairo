@@ -4,8 +4,8 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
-  ctx = serface.newContext()
+  surface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = surface.newContext()
 
 var linerGradient = patternCreateLinear(0.0, 0.0,  0.0, 256.0)
 linerGradient.addColorStopRgba(1, 0, 0, 0, 1)
@@ -21,4 +21,4 @@ ctx.setSource(radialGradient)
 ctx.arc(128.0, 128.0, 76.8, 0, 2 * PI)
 ctx.fill()
 
-discard serface.writeToPng("examples/gradient.png")
+discard surface.writeToPng("examples/gradient.png")

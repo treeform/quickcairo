@@ -4,8 +4,8 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
-  ctx = serface.newContext()
+  surface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = surface.newContext()
 
 ctx.moveTo(128.0, 25.6)
 ctx.lineTo(230.4, 230.4)
@@ -25,4 +25,4 @@ ctx.fillPreserve()
 ctx.setSource(0, 0, 0)
 ctx.stroke()
 
-discard serface.writeToPng("examples/fill_and_stroke.png")
+discard surface.writeToPng("examples/fill_and_stroke.png")

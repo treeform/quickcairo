@@ -4,8 +4,8 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
-  ctx = serface.newContext()
+  surface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = surface.newContext()
 
 var
   x=25.6
@@ -31,4 +31,4 @@ ctx.moveTo(x2, y2)
 ctx.lineTo(x3, y3)
 ctx.stroke()
 
-discard serface.writeToPng("examples/curve_to.png")
+discard surface.writeToPng("examples/curve_to.png")

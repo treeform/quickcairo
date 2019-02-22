@@ -4,8 +4,8 @@ import cairo
 import math
 
 var
-  serface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
-  ctx = serface.newContext()
+  surface = imageSurfaceCreate(FORMAT.argb32, 256, 256)
+  ctx = surface.newContext()
 
 var
   image = imageSurfaceCreateFromPng("examples/data/romedalen.png")
@@ -22,4 +22,4 @@ ctx.paint()
 
 ctx.stroke()
 
-discard serface.writeToPng("examples/image.png")
+discard surface.writeToPng("examples/image.png")
