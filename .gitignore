@@ -1,2 +1,9 @@
+# ignore files with no extention:
+*
+!*/
+!*.*
+
+# ignore normal files
+.*
 *.exe
 nimcache
