@@ -1866,12 +1866,12 @@ proc imageSurfaceGetFormat*(surface: Surface): Format =
 
 proc cairo_image_surface_get_width*(surface: ptr Surface00): cint {.importc, libcairo.}
 #
-proc imageSurfaceGetWidth*(surface: Surface): int =
+proc width*(surface: Surface): int =
   cairo_image_surface_get_width(surface.impl).int
 
 proc cairo_image_surface_get_height*(surface: ptr Surface00): cint {.importc, libcairo.}
 #
-proc imageSurfaceGetHeight*(surface: Surface): int =
+proc height*(surface: Surface): int =
   cairo_image_surface_get_height(surface.impl).int
 
 proc cairo_image_surface_get_stride*(surface: ptr Surface00): cint {.importc, libcairo.}
